@@ -3,6 +3,7 @@ import html2canvas from 'html2canvas';
 import { ClientProfile, Quarter, Data2550Q } from '../types/tax';
 import { ClientBranchSchedule, PurchasesReportingMode, BirUploadedFileRecord, BirTransactionRow } from '../types/branchVat';
 import { calculate2550Q, Result2550Q, computeMonthlyQuarterBreakdown } from './taxCalculations';
+import { DeferredClientRecord, QuarterlyDeferralDetail } from './deferralTracker';
 
 interface PdfExportOptions {
   client: ClientProfile;
@@ -285,14 +286,14 @@ export async function exportMultiBranchAnd2550QPdf({
 
   // Build HTML for Page 1 and Page 2
   container.innerHTML = `
-    <!-- PAGE 1: Multi-Branch Aggregation Summary -->
+    <!-- PAGE 1: VAT TABLE -->
     <div id="pdf-page-1" style="width: 1120px; min-height: 792px; padding: 28px 36px; background-color: #ffffff; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between;">
       <div>
         <!-- Official BIR Header -->
         <div style="border-bottom: 2px solid #1e293b; padding-bottom: 12px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: flex-start;">
           <div>
             <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #475569;">
-              Republic of the Philippines • Department of Finance • Bureau of Internal Revenue
+              Bureau of Internal Revenue
             </div>
             <div style="font-size: 18px; font-weight: 800; color: #0f172a; margin-top: 2px; letter-spacing: -0.01em;">
               ${client.registeredName || client.tradeName || 'Taxpayer'}
@@ -308,19 +309,12 @@ export async function exportMultiBranchAnd2550QPdf({
           </div>
         </div>
 
-        <!-- Taxpayer Profile Grid (Only TIN, Purchases Mode, and Form Type) -->
-        <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; display: grid; grid-template-columns: 1.4fr 1.3fr 1.3fr; gap: 16px; font-size: 11px;">
+        <!-- Taxpayer Profile Grid (Only TIN and Form Type) -->
+        <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 20px; font-size: 11px;">
           <div>
             <div style="font-size: 9px; font-weight: 700; text-transform: uppercase; color: #64748b; letter-spacing: 0.04em;">Taxpayer Identification No. (TIN)</div>
             <div style="font-weight: 700; font-family: monospace; color: #0f172a; font-size: 12.5px; margin-top: 1px;">${client.tin}</div>
             <div style="font-size: 10px; color: #475569; margin-top: 1px;">RDO: ${client.rdo} • Classification: ${client.classification}</div>
-          </div>
-          <div>
-            <div style="font-size: 9px; font-weight: 700; text-transform: uppercase; color: #64748b; letter-spacing: 0.04em;">Purchases Mode</div>
-            <div style="font-weight: 700; color: #0f172a; font-size: 11.5px; margin-top: 1px;">
-              ${purchasesMode === 'per-branch' ? 'Per-Branch Input Tax' : 'Consolidated Purchases'}
-            </div>
-            <div style="font-size: 10px; color: #64748b; margin-top: 1px;">Branches: ${branches.length} Active</div>
           </div>
           <div>
             <div style="font-size: 9px; font-weight: 700; text-transform: uppercase; color: #64748b; letter-spacing: 0.04em;">Form Type</div>
@@ -332,7 +326,7 @@ export async function exportMultiBranchAnd2550QPdf({
         <!-- Section 1 Title -->
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
           <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: #1e293b;">
-            1. Multi-Branch Aggregation Summary Table (${quarter} ${year} Consolidated)
+            1. VAT TABLE (${quarter} ${year} Consolidated)
           </div>
           <div style="font-size: 10px; color: #64748b; font-style: italic;">
             Amounts in Philippine Peso (PHP) • Strictly orthogonal alignment
@@ -1085,7 +1079,7 @@ export async function exportVatComparisonPdf({
           </div>
           <div>
             <div style="font-size: 8px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.08em;">
-              Republic of the Philippines • Bureau of Internal Revenue
+              Bureau of Internal Revenue
             </div>
             <div style="font-size: 16px; font-weight: 800; color: #0f172a; letter-spacing: -0.01em; margin-top: 1px;">
               ${client.registeredName || client.tradeName || 'Taxpayer'}
@@ -1105,19 +1099,12 @@ export async function exportVatComparisonPdf({
         </div>
       </div>
 
-      <!-- Taxpayer Profile Grid (Only TIN, Purchases Mode, and Form Type) -->
-      <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 12px; margin-bottom: 10px; display: grid; grid-template-columns: 1.4fr 1.3fr 1.3fr; gap: 12px; font-size: 9px;">
+      <!-- Taxpayer Profile Grid (Only TIN and Form Type) -->
+      <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 12px; margin-bottom: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; font-size: 9px;">
         <div>
           <div style="font-size: 8px; font-weight: 700; text-transform: uppercase; color: #64748b; letter-spacing: 0.04em;">Taxpayer Identification No. (TIN)</div>
           <div style="font-weight: 700; font-family: monospace; color: #0f172a; font-size: 11px; margin-top: 1px;">${client.tin}</div>
           <div style="font-size: 8.5px; color: #475569; margin-top: 1px;">RDO: ${client.rdo} • Classification: ${client.classification}</div>
-        </div>
-        <div>
-          <div style="font-size: 8px; font-weight: 700; text-transform: uppercase; color: #64748b; letter-spacing: 0.04em;">Purchases Mode</div>
-          <div style="font-weight: 700; color: #0f172a; font-size: 10px; margin-top: 1px;">
-            ${purchasesMode === 'per-branch' ? 'Per-Branch Input Tax' : 'Consolidated Purchases'}
-          </div>
-          <div style="font-size: 8.5px; color: #475569; margin-top: 1px;">${branches.length} Active Branch(es)</div>
         </div>
         <div>
           <div style="font-size: 8px; font-weight: 700; text-transform: uppercase; color: #64748b; letter-spacing: 0.04em;">Form Type</div>
@@ -1496,3 +1483,256 @@ export async function exportVatComparisonPdf({
     }
   }
 }
+
+export interface DeferredPdfExportOptions {
+  client: ClientProfile;
+  year: number;
+  currentQuarter: Quarter;
+  deferredClients: DeferredClientRecord[];
+  quarterlyBreakdown?: QuarterlyDeferralDetail[];
+  accumulatedPriorTaxable?: number;
+  accumulatedPriorVatDue?: number;
+}
+
+export async function exportDeferredClientsListPdf(options: DeferredPdfExportOptions): Promise<void> {
+  const {
+    client,
+    year,
+    currentQuarter,
+    deferredClients,
+    quarterlyBreakdown = [],
+    accumulatedPriorTaxable = 0,
+    accumulatedPriorVatDue = 0,
+  } = options;
+
+  const container = document.createElement('div');
+  container.style.position = 'fixed';
+  container.style.left = '-9999px';
+  container.style.top = '0';
+  container.style.zIndex = '-1000';
+  document.body.appendChild(container);
+
+  try {
+    const totalSpecificTaxable = deferredClients.reduce((sum, c) => sum + (c.taxableAmount || 0), 0);
+    const totalSpecificVatDue = deferredClients.reduce((sum, c) => sum + (c.taxAmount || 0), 0);
+
+    const clientRowsHtml = deferredClients.length > 0
+      ? deferredClients
+          .map(
+            (c, i) => `
+          <tr style="background-color: ${i % 2 === 0 ? '#ffffff' : '#f8fafc'}; border-bottom: 1px solid #e2e8f0;">
+            <td style="padding: 7px 10px; font-size: 10px; text-align: center; color: #64748b;">${i + 1}</td>
+            <td style="padding: 7px 10px; font-size: 10px; font-weight: 700; color: #4338ca; text-align: center;">${c.quarter} ${c.year}</td>
+            <td style="padding: 7px 10px; font-size: 10px; color: #475569;">${c.branchName}</td>
+            <td style="padding: 7px 10px; font-size: 10.5px; font-weight: 600; color: #0f172a;">${c.registeredName}</td>
+            <td style="padding: 7px 10px; font-size: 10px; font-family: monospace; color: #334155;">${c.tin || 'N/A'}</td>
+            <td style="padding: 7px 10px; font-size: 10px; font-family: monospace; text-align: right; color: #0f172a;">${formatPdfCurrency(c.taxableAmount || 0)}</td>
+            <td style="padding: 7px 10px; font-size: 10px; font-family: monospace; text-align: right; font-weight: 700; color: #4338ca;">${formatPdfCurrency(c.taxAmount || 0)}</td>
+            <td style="padding: 7px 10px; font-size: 9px; text-align: center;">
+              <span style="display: inline-block; padding: 2px 6px; border-radius: 4px; background-color: #ede9fe; color: #6d28d9; font-weight: 700;">DEFERRED</span>
+            </td>
+          </tr>
+        `
+          )
+          .join('')
+      : `
+        <tr>
+          <td colspan="8" style="padding: 24px; text-align: center; color: #94a3b8; font-size: 11px;">
+            No specific client sales deferred from the start of taxable year ${year} up to ${currentQuarter}.
+          </td>
+        </tr>
+      `;
+
+    const quarterlyBreakdownHtml = quarterlyBreakdown
+      .map(
+        (qb) => `
+        <tr style="border-bottom: 1px solid #e2e8f0; font-size: 10px;">
+          <td style="padding: 6px 10px; font-weight: 700; color: #1e1b4b;">${qb.quarter} ${qb.year}</td>
+          <td style="padding: 6px 10px; text-align: center; color: #475569;">${qb.clientCount} clients</td>
+          <td style="padding: 6px 10px; text-align: right; font-family: monospace; color: #334155;">${formatPdfCurrency(qb.specificTaxable)}</td>
+          <td style="padding: 6px 10px; text-align: right; font-family: monospace; color: #334155;">${formatPdfCurrency(qb.specificVatDue)}</td>
+          <td style="padding: 6px 10px; text-align: right; font-family: monospace; color: #334155;">${formatPdfCurrency(qb.manualTaxable)}</td>
+          <td style="padding: 6px 10px; text-align: right; font-family: monospace; color: #334155;">${formatPdfCurrency(qb.manualVatDue)}</td>
+          <td style="padding: 6px 10px; text-align: right; font-family: monospace; font-weight: 700; color: #0f172a;">${formatPdfCurrency(qb.totalTaxable)}</td>
+          <td style="padding: 6px 10px; text-align: right; font-family: monospace; font-weight: 800; color: #4338ca;">${formatPdfCurrency(qb.totalVatDue)}</td>
+        </tr>
+      `
+      )
+      .join('');
+
+    container.innerHTML = `
+      <div id="pdf-deferred-clients-page" style="width: 1120px; min-height: 792px; padding: 28px 36px; background-color: #ffffff; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between;">
+        <div>
+          <!-- Header -->
+          <div style="border-bottom: 2px solid #1e293b; padding-bottom: 12px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: flex-start;">
+            <div>
+              <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #475569;">
+                Bureau of Internal Revenue
+              </div>
+              <div style="font-size: 18px; font-weight: 800; color: #0f172a; margin-top: 2px; letter-spacing: -0.01em;">
+                ${client.registeredName || client.tradeName || 'Taxpayer'}
+              </div>
+              <div style="font-size: 11px; color: #64748b; margin-top: 1px;">
+                Schedule of Deferred Clients &amp; Output Tax • Taxable Year ${year} (Beginning of Taxable Year Q1 to ${currentQuarter})
+              </div>
+            </div>
+            <div style="text-align: right; background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 14px;">
+              <div style="font-size: 10px; font-weight: 700; text-transform: uppercase; color: #475569; letter-spacing: 0.05em;">Taxable Year</div>
+              <div style="font-size: 15px; font-weight: 800; color: #1e1b4b; margin-top: 1px;">${year} (YTD ${currentQuarter})</div>
+              <div style="font-size: 10px; color: #64748b; margin-top: 1px;">Form: BIR Form 2550Q Deferral Log</div>
+            </div>
+          </div>
+
+          <!-- Taxpayer Profile -->
+          <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 16px; font-size: 11px;">
+            <div>
+              <div style="font-size: 9px; font-weight: 700; text-transform: uppercase; color: #64748b;">Taxpayer Identification No. (TIN)</div>
+              <div style="font-weight: 700; font-family: monospace; color: #0f172a; font-size: 12.5px; margin-top: 1px;">${client.tin}</div>
+            </div>
+            <div>
+              <div style="font-size: 9px; font-weight: 700; text-transform: uppercase; color: #64748b;">Revenue District Office</div>
+              <div style="font-weight: 600; color: #1e293b; font-size: 11px; margin-top: 1px;">${client.rdo}</div>
+            </div>
+            <div>
+              <div style="font-size: 9px; font-weight: 700; text-transform: uppercase; color: #64748b;">Cumulative Period</div>
+              <div style="font-weight: 700; color: #4338ca; font-size: 11px; margin-top: 1px;">Q1 ${year} - ${currentQuarter} ${year}</div>
+            </div>
+          </div>
+
+          <!-- Summary Metric Cards -->
+          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px;">
+            <div style="background-color: #f5f3ff; border: 1px solid #ddd6fe; border-radius: 8px; padding: 10px 12px;">
+              <div style="font-size: 9.5px; font-weight: 700; text-transform: uppercase; color: #6d28d9;">Specific Clients Deferred</div>
+              <div style="font-size: 16px; font-weight: 800; color: #4c1d95; margin-top: 2px;">${deferredClients.length}</div>
+              <div style="font-size: 9px; color: #7c3aed;">Across all branches (YTD)</div>
+            </div>
+            <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 12px;">
+              <div style="font-size: 9.5px; font-weight: 700; text-transform: uppercase; color: #475569;">Specific Taxable Sales</div>
+              <div style="font-size: 15px; font-weight: 800; font-family: monospace; color: #0f172a; margin-top: 2px;">${formatPdfCurrency(totalSpecificTaxable)}</div>
+              <div style="font-size: 9px; color: #64748b;">Total deferred taxable base</div>
+            </div>
+            <div style="background-color: #f5f3ff; border: 1px solid #c4b5fd; border-radius: 8px; padding: 10px 12px;">
+              <div style="font-size: 9.5px; font-weight: 700; text-transform: uppercase; color: #5b21b6;">Specific VAT Due Deferral</div>
+              <div style="font-size: 15px; font-weight: 800; font-family: monospace; color: #5b21b6; margin-top: 2px;">${formatPdfCurrency(totalSpecificVatDue)}</div>
+              <div style="font-size: 9px; color: #7c3aed;">12% Output Tax deferred</div>
+            </div>
+            <div style="background-color: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 8px; padding: 10px 12px;">
+              <div style="font-size: 9.5px; font-weight: 700; text-transform: uppercase; color: #065f46;">Prior Quarters Running Balance</div>
+              <div style="font-size: 15px; font-weight: 800; font-family: monospace; color: #047857; margin-top: 2px;">${formatPdfCurrency(accumulatedPriorTaxable)}</div>
+              <div style="font-size: 9px; color: #059669;">VAT Due: ${formatPdfCurrency(accumulatedPriorVatDue)}</div>
+            </div>
+          </div>
+
+          <!-- Deferred Clients Table -->
+          <div style="border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden; margin-bottom: 14px;">
+            <div style="background-color: #1e1b4b; color: #ffffff; padding: 8px 12px; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; display: flex; justify-content: space-between;">
+              <span>Deferred Customers List (Taxable Year ${year}: Q1 to ${currentQuarter})</span>
+              <span>${deferredClients.length} Records</span>
+            </div>
+            <table style="width: 100%; border-collapse: collapse; text-align: left;">
+              <thead>
+                <tr style="background-color: #f1f5f9; border-bottom: 1.5px solid #cbd5e1; font-size: 9px; text-transform: uppercase; font-weight: 700; color: #475569;">
+                  <th style="padding: 7px 10px; width: 35px; text-align: center;">#</th>
+                  <th style="padding: 7px 10px; width: 75px; text-align: center;">Quarter</th>
+                  <th style="padding: 7px 10px; width: 140px;">Branch</th>
+                  <th style="padding: 7px 10px;">Registered Customer Name</th>
+                  <th style="padding: 7px 10px; width: 120px;">TIN</th>
+                  <th style="padding: 7px 10px; width: 130px; text-align: right;">Taxable Sales (Col H)</th>
+                  <th style="padding: 7px 10px; width: 120px; text-align: right;">VAT Due (Col L)</th>
+                  <th style="padding: 7px 10px; width: 75px; text-align: center;">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${clientRowsHtml}
+              </tbody>
+              <tfoot>
+                <tr style="background-color: #f8fafc; border-top: 2px solid #0f172a; font-weight: 800; font-size: 10.5px;">
+                  <td colspan="5" style="padding: 8px 10px; text-align: right; text-transform: uppercase; color: #0f172a;">Total Specific Deferrals (YTD):</td>
+                  <td style="padding: 8px 10px; font-family: monospace; text-align: right; color: #0f172a;">${formatPdfCurrency(totalSpecificTaxable)}</td>
+                  <td style="padding: 8px 10px; font-family: monospace; text-align: right; color: #4338ca;">${formatPdfCurrency(totalSpecificVatDue)}</td>
+                  <td></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+
+          <!-- Quarterly Breakdown if multiple quarters -->
+          ${
+            quarterlyBreakdown.length > 0
+              ? `
+            <div style="border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; margin-bottom: 12px;">
+              <div style="background-color: #f8fafc; border-bottom: 1px solid #cbd5e1; padding: 6px 12px; font-size: 9.5px; font-weight: 700; text-transform: uppercase; color: #475569;">
+                Taxable Year ${year} Cumulative Quarterly Summary
+              </div>
+              <table style="width: 100%; border-collapse: collapse; text-align: left;">
+                <thead>
+                  <tr style="background-color: #ffffff; border-bottom: 1px solid #e2e8f0; font-size: 8.5px; text-transform: uppercase; font-weight: 700; color: #64748b;">
+                    <th style="padding: 5px 10px;">Quarter</th>
+                    <th style="padding: 5px 10px; text-align: center;">Clients</th>
+                    <th style="padding: 5px 10px; text-align: right;">Specific Taxable</th>
+                    <th style="padding: 5px 10px; text-align: right;">Specific VAT</th>
+                    <th style="padding: 5px 10px; text-align: right;">Manual Taxable</th>
+                    <th style="padding: 5px 10px; text-align: right;">Manual VAT</th>
+                    <th style="padding: 5px 10px; text-align: right;">Total Taxable</th>
+                    <th style="padding: 5px 10px; text-align: right;">Total VAT Due</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${quarterlyBreakdownHtml}
+                </tbody>
+              </table>
+            </div>
+          `
+              : ''
+          }
+        </div>
+
+        <!-- Footer & Signatures -->
+        <div style="border-top: 1px solid #cbd5e1; padding-top: 10px; font-size: 9px; color: #64748b; display: flex; justify-content: space-between; align-items: flex-end;">
+          <div>
+            <div>Generated from BIR Multi-Branch Tax Filing System • Republic Act No. 11976 (eOPT Act)</div>
+            <div>Report Date: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
+          </div>
+          <div style="display: flex; gap: 40px; text-align: center;">
+            <div>
+              <div style="width: 160px; border-bottom: 1px solid #94a3b8; margin-bottom: 4px;"></div>
+              <div>Prepared By / Taxpayer</div>
+            </div>
+            <div>
+              <div style="width: 160px; border-bottom: 1px solid #94a3b8; margin-bottom: 4px;"></div>
+              <div>Certified Correct (Accountant)</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const pageEl = container.querySelector('#pdf-deferred-clients-page') as HTMLElement;
+    const canvas = await html2canvas(pageEl, {
+      scale: 2,
+      useCORS: true,
+      backgroundColor: '#ffffff',
+      logging: false,
+    });
+
+    const pdf = new jsPDF({
+      orientation: 'landscape',
+      unit: 'mm',
+      format: 'a4',
+    });
+
+    const imgData = canvas.toDataURL('image/png');
+    pdf.addImage(imgData, 'PNG', 0, 0, 297, 210, undefined, 'FAST');
+
+    const cleanCompName = (client.registeredName || client.tradeName || 'Taxpayer')
+      .trim()
+      .replace(/[^a-zA-Z0-9_-]/g, '_')
+      .replace(/_+/g, '_');
+    pdf.save(`BIR_Deferred_Clients_${cleanCompName}_${year}_${currentQuarter}.pdf`);
+  } finally {
+    if (document.body.contains(container)) {
+      document.body.removeChild(container);
+    }
+  }
+}
+

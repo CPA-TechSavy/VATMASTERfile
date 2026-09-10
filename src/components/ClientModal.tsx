@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Building2, User, Trash2 } from 'lucide-react';
 import { ClientProfile, TaxClassification, VatStatus } from '../types/tax';
 import { formatTIN } from '../utils/formatters';
+import { BIR_RDO_LIST } from '../data/rdoList';
 
 interface ClientModalProps {
   isOpen: boolean;
@@ -43,7 +44,7 @@ export const ClientModal: React.FC<ClientModalProps> = ({
       setTradeName('');
       setRegisteredName('');
       setTin('');
-      setRdo('RDO 044 - Taguig / Pateros');
+      setRdo('RDO 98 - West Misamis Oriental');
       setClassification('Corporation');
       setVatStatus('vat-registered');
       setIsWithholdingAgent(false);
@@ -153,14 +154,21 @@ export const ClientModal: React.FC<ClientModalProps> = ({
               <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">
                 RDO (Revenue District Office)
               </label>
-              <input
-                id="client-rdo-input"
-                type="text"
+              <select
+                id="client-rdo-select"
                 value={rdo}
                 onChange={(e) => setRdo(e.target.value)}
-                placeholder="e.g. RDO 044 - Taguig / Pateros"
-                className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-              />
+                className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              >
+                {!BIR_RDO_LIST.includes(rdo) && rdo && (
+                  <option value={rdo}>{rdo}</option>
+                )}
+                {BIR_RDO_LIST.map((rdoOption) => (
+                  <option key={rdoOption} value={rdoOption}>
+                    {rdoOption}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 

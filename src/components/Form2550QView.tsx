@@ -1,12 +1,14 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Data2550Q, ClientProfile, Quarter } from '../types/tax';
-import { calculate2550Q } from '../utils/taxCalculations';
+import { calculate2550Q, getPriorQuarterExcessInputVat } from '../utils/taxCalculations';
 import { formatPHP, parseNumber } from '../utils/formatters';
 import {
   AlertTriangle,
   Save,
   CheckCircle2,
   Check,
+  ArrowRightLeft,
+  Lock,
 } from 'lucide-react';
 import { PenaltiesModal } from './PenaltiesModal';
 import { BranchVatSchedule } from './BranchVatSchedule';
@@ -23,6 +25,57 @@ interface Form2550QViewProps {
   data: Data2550Q;
   onChange: (updated: Data2550Q) => void;
 }
+
+const AccountingInputField: React.FC<{
+  id: string;
+  value: number;
+  onChange?: (val: number) => void;
+  readOnly?: boolean;
+  placeholder?: string;
+  className?: string;
+}> = ({ id, value, onChange, readOnly = false, placeholder = '0.00', className = '' }) => {
+  const [isFocused, setIsFocused] = useState(false);
+  const [localText, setLocalText] = useState('');
+
+  const displayValue = isFocused
+    ? localText
+    : (value !== undefined && value !== null ? formatPHP(value, false) : '0.00');
+
+  const handleFocus = (e: React.FocusEvent<HTMLInputElement>) => {
+    if (readOnly) return;
+    setIsFocused(true);
+    setLocalText(value ? value.toString() : '');
+    e.target.select();
+  };
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    setLocalText(raw);
+    if (onChange) {
+      onChange(parseNumber(raw));
+    }
+  };
+
+  const handleBlur = () => {
+    setIsFocused(false);
+  };
+
+  return (
+    <input
+      id={id}
+      type="text"
+      inputMode="decimal"
+      readOnly={readOnly}
+      tabIndex={readOnly ? -1 : undefined}
+      value={displayValue}
+      onFocus={handleFocus}
+      onChange={handleChange}
+      onBlur={handleBlur}
+      placeholder={placeholder}
+      className={className}
+    />
+  );
+};
 
 export const Form2550QView: React.FC<Form2550QViewProps> = ({
   client,
@@ -130,12 +183,45 @@ export const Form2550QView: React.FC<Form2550QViewProps> = ({
     } catch (e) {}
   }, [branchScheduleStorageKey]);
 
+  const [computedSchedule1, setComputedSchedule1] = useState<{
+    vatableSales: number;
+    salesToGovernment: number;
+    zeroRatedSales: number;
+    vatExemptSales: number;
+    inputPurchasesGoods: number;
+    priorQuarterExcessInputVat?: number;
+  } | null>(null);
+
+  // Computed Prior Quarter's Excess Input Tax (only if previous quarter VAT Due was negative)
+  const priorQuarterExcessInfo = React.useMemo(
+    () => getPriorQuarterExcessInputVat(client.id, quarter, year),
+    [client.id, quarter, year]
+  );
+
+  // Keep priorQuarterExcessInputVat aligned automatically if previous quarter VAT due is negative
+  useEffect(() => {
+    if (data.priorQuarterExcessInputVat !== priorQuarterExcessInfo.excessInputVat) {
+      onChange({
+        ...data,
+        priorQuarterExcessInputVat: priorQuarterExcessInfo.excessInputVat,
+      });
+    }
+  }, [client.id, quarter, year, priorQuarterExcessInfo.excessInputVat]);
+
   const handleBranchScheduleChange = useCallback(
     (updated: {
       branches: ClientBranchSchedule[];
       purchasesMode: PurchasesReportingMode;
       consolidatedPurchasesFile?: BirUploadedFileRecord;
       deferralState?: any;
+      schedule1Computed?: {
+        vatableSales: number;
+        salesToGovernment: number;
+        zeroRatedSales: number;
+        vatExemptSales: number;
+        inputPurchasesGoods: number;
+        priorQuarterExcessInputVat?: number;
+      };
     }) => {
       setBranchScheduleState((prev) => {
         if (
@@ -151,6 +237,10 @@ export const Form2550QView: React.FC<Form2550QViewProps> = ({
           consolidatedPurchasesFile: updated.consolidatedPurchasesFile,
         };
       });
+
+      if (updated.schedule1Computed) {
+        setComputedSchedule1(updated.schedule1Computed);
+      }
     },
     []
   );
@@ -200,20 +290,30 @@ export const Form2550QView: React.FC<Form2550QViewProps> = ({
 
   const handleSyncFromBranchSchedule = (totals: {
     vatableSales: number;
+    salesToGovernment?: number;
     zeroRatedSales: number;
     vatExemptSales: number;
     inputPurchasesGoods: number;
-    inputPurchasesServices: number;
-    inputCapitalGoods: number;
+    inputPurchasesServices?: number;
+    inputCapitalGoods?: number;
+    priorQuarterExcessInputVat?: number;
   }) => {
+    const priorExcess =
+      totals.priorQuarterExcessInputVat !== undefined
+        ? totals.priorQuarterExcessInputVat
+        : priorQuarterExcessInfo.excessInputVat;
+
     onChange({
       ...data,
       vatableSales: totals.vatableSales,
+      salesToGovernment:
+        totals.salesToGovernment !== undefined ? totals.salesToGovernment : data.salesToGovernment || 0,
       zeroRatedSales: totals.zeroRatedSales,
       vatExemptSales: totals.vatExemptSales,
       inputPurchasesGoods: totals.inputPurchasesGoods,
-      inputPurchasesServices: totals.inputPurchasesServices,
-      inputCapitalGoods: totals.inputCapitalGoods,
+      inputPurchasesServices: totals.inputPurchasesServices ?? data.inputPurchasesServices ?? 0,
+      inputCapitalGoods: totals.inputCapitalGoods ?? data.inputCapitalGoods ?? 0,
+      priorQuarterExcessInputVat: priorExcess,
     });
   };
 
@@ -260,73 +360,80 @@ export const Form2550QView: React.FC<Form2550QViewProps> = ({
         <div className="lg:col-span-7 space-y-6">
           {/* Output Taxable Sales */}
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
-            <div className="text-xs font-bold uppercase tracking-wider text-slate-500">
-              Schedule 1: Sales / Receipts (Output Tax)
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-1 border-b border-slate-100">
+              <div className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-2">
+                <span>Schedule 1: Sales / Receipts (Output Tax)</span>
+                <span className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold bg-slate-100 text-slate-600 rounded-md border border-slate-200">
+                  <Lock className="w-3 h-3 text-slate-400" />
+                  <span>Locked</span>
+                </span>
+              </div>
+              <div className="text-[11px] text-slate-400">
+                Synced from Multi-Branch Filings &amp; Deferrals
+              </div>
             </div>
 
             <div className="space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
                   <div className="text-sm text-slate-700 font-medium">Vatable Sales / Receipts (12%)</div>
-                  <div className="text-xs text-slate-400">Regular domestic sales subject to 12% VAT</div>
                 </div>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInputField
                     id="vatable-sales-2550q"
-                    type="number"
-                    value={data.vatableSales || ''}
-                    onChange={(e) => updateField('vatableSales', parseNumber(e.target.value))}
+                    value={data.vatableSales || 0}
+                    readOnly
                     placeholder="0.00"
-                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-violet-500"
+                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right bg-slate-100 text-slate-800 font-semibold border border-slate-200 rounded-lg cursor-not-allowed select-all focus:outline-none"
                   />
                 </div>
               </div>
 
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
-                  <div className="text-sm text-slate-700">Sales to Government (12%)</div>
-                  <div className="text-xs text-slate-400">Subject to standard 5% VAT withholding</div>
+                  <div className="text-sm text-slate-700 font-medium">Sales to Government (12%)</div>
                 </div>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInputField
                     id="govt-sales-2550q"
-                    type="number"
-                    value={data.salesToGovernment || ''}
-                    onChange={(e) => updateField('salesToGovernment', parseNumber(e.target.value))}
+                    value={data.salesToGovernment || 0}
+                    readOnly
                     placeholder="0.00"
-                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-violet-500"
+                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right bg-slate-100 text-slate-800 font-semibold border border-slate-200 rounded-lg cursor-not-allowed select-all focus:outline-none"
                   />
                 </div>
               </div>
 
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <label className="text-sm text-slate-700">Zero-Rated Sales (0%)</label>
+                <div>
+                  <label className="text-sm text-slate-700 font-medium">Zero-Rated Sales (0%)</label>
+                </div>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInputField
                     id="zero-rated-2550q"
-                    type="number"
-                    value={data.zeroRatedSales || ''}
-                    onChange={(e) => updateField('zeroRatedSales', parseNumber(e.target.value))}
+                    value={data.zeroRatedSales || 0}
+                    readOnly
                     placeholder="0.00"
-                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-violet-500"
+                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right bg-slate-100 text-slate-800 font-semibold border border-slate-200 rounded-lg cursor-not-allowed select-all focus:outline-none"
                   />
                 </div>
               </div>
 
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <label className="text-sm text-slate-700">VAT-Exempt Sales</label>
+                <div>
+                  <label className="text-sm text-slate-700 font-medium">VAT-Exempt Sales</label>
+                </div>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInputField
                     id="exempt-sales-2550q"
-                    type="number"
-                    value={data.vatExemptSales || ''}
-                    onChange={(e) => updateField('vatExemptSales', parseNumber(e.target.value))}
+                    value={data.vatExemptSales || 0}
+                    readOnly
                     placeholder="0.00"
-                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-violet-500"
+                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right bg-slate-100 text-slate-800 font-semibold border border-slate-200 rounded-lg cursor-not-allowed select-all focus:outline-none"
                   />
                 </div>
               </div>
@@ -335,67 +442,91 @@ export const Form2550QView: React.FC<Form2550QViewProps> = ({
 
           {/* Input Tax on Purchases */}
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
-            <div className="text-xs font-bold uppercase tracking-wider text-slate-500">
-              Schedule 2: Allowable Input Tax on Purchases (12%)
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-1 border-b border-slate-100">
+              <div className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-2">
+                <span>Schedule 2: Allowable Input Tax on Purchases (12%)</span>
+                <span className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold bg-slate-100 text-slate-600 rounded-md border border-slate-200">
+                  <Lock className="w-3 h-3 text-slate-400" />
+                  <span>Locked</span>
+                </span>
+              </div>
+              <div className="text-[11px] text-slate-400">
+                Synced from Purchases Filings &amp; Prior Quarter
+              </div>
             </div>
 
             <div className="space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <label className="text-sm text-slate-700">Domestic Purchases of Goods</label>
+                <div>
+                  <label className="text-sm text-slate-700 font-medium">Domestic Purchases of Goods</label>
+                </div>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInputField
                     id="input-goods-2550q"
-                    type="number"
-                    value={data.inputPurchasesGoods || ''}
-                    onChange={(e) => updateField('inputPurchasesGoods', parseNumber(e.target.value))}
+                    value={data.inputPurchasesGoods || 0}
+                    readOnly
                     placeholder="0.00"
-                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-violet-500"
+                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right bg-slate-100 text-slate-800 font-semibold border border-slate-200 rounded-lg cursor-not-allowed select-all focus:outline-none"
                   />
                 </div>
               </div>
 
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <label className="text-sm text-slate-700">Domestic Purchases of Services</label>
+                <div>
+                  <label className="text-sm text-slate-700 font-medium">Domestic Purchases of Services</label>
+                </div>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInputField
                     id="input-services-2550q"
-                    type="number"
-                    value={data.inputPurchasesServices || ''}
-                    onChange={(e) => updateField('inputPurchasesServices', parseNumber(e.target.value))}
+                    value={data.inputPurchasesServices || 0}
+                    readOnly
                     placeholder="0.00"
-                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-violet-500"
+                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right bg-slate-100 text-slate-800 font-semibold border border-slate-200 rounded-lg cursor-not-allowed select-all focus:outline-none"
                   />
                 </div>
               </div>
 
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <label className="text-sm text-slate-700">Capital Goods Purchases</label>
+                <div>
+                  <label className="text-sm text-slate-700 font-medium">Capital Goods Purchases</label>
+                </div>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInputField
                     id="input-capital-2550q"
-                    type="number"
-                    value={data.inputCapitalGoods || ''}
-                    onChange={(e) => updateField('inputCapitalGoods', parseNumber(e.target.value))}
+                    value={data.inputCapitalGoods || 0}
+                    readOnly
                     placeholder="0.00"
-                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-violet-500"
+                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right bg-slate-100 text-slate-800 font-semibold border border-slate-200 rounded-lg cursor-not-allowed select-all focus:outline-none"
                   />
                 </div>
               </div>
 
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <label className="text-sm text-slate-700">Prior Quarter's Excess Input Tax</label>
+                <div>
+                  <div className="text-sm text-slate-700 font-medium flex items-center gap-2">
+                    <span>Prior Quarter's Excess Input Tax</span>
+                    <span
+                      className={`text-[10px] font-bold px-1.5 py-0.2 rounded-full ${
+                        priorQuarterExcessInfo.excessInputVat > 0
+                          ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                          : 'bg-slate-100 text-slate-600 border border-slate-200'
+                      }`}
+                    >
+                      {priorQuarterExcessInfo.excessInputVat > 0 ? 'Negative Prev VAT Due' : '₱0.00 (Not Negative)'}
+                    </span>
+                  </div>
+                </div>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInputField
                     id="prior-excess-input-2550q"
-                    type="number"
-                    value={data.priorQuarterExcessInputVat || ''}
-                    onChange={(e) => updateField('priorQuarterExcessInputVat', parseNumber(e.target.value))}
+                    value={data.priorQuarterExcessInputVat || 0}
+                    readOnly
                     placeholder="0.00"
-                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-violet-500"
+                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right bg-slate-100 text-slate-800 font-semibold border border-slate-200 rounded-lg cursor-not-allowed select-all focus:outline-none"
                   />
                 </div>
               </div>
@@ -412,17 +543,15 @@ export const Form2550QView: React.FC<Form2550QViewProps> = ({
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
                   <div className="text-sm text-slate-700">VAT Withheld on Sales to Govt (Form 2307)</div>
-                  <div className="text-xs text-slate-400">5% standard final withholding VAT</div>
                 </div>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInputField
                     id="vat-govt-withheld-2550q"
-                    type="number"
-                    value={data.withheldVat2307Govt || ''}
-                    onChange={(e) => updateField('withheldVat2307Govt', parseNumber(e.target.value))}
+                    value={data.withheldVat2307Govt || 0}
+                    onChange={(val) => updateField('withheldVat2307Govt', val)}
                     placeholder="0.00"
-                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-violet-500"
+                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-violet-500 font-medium"
                   />
                 </div>
               </div>
@@ -431,13 +560,12 @@ export const Form2550QView: React.FC<Form2550QViewProps> = ({
                 <label className="text-sm text-slate-700">Other Creditable VAT Withheld</label>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInputField
                     id="vat-other-withheld-2550q"
-                    type="number"
-                    value={data.withheldVat2307Private || ''}
-                    onChange={(e) => updateField('withheldVat2307Private', parseNumber(e.target.value))}
+                    value={data.withheldVat2307Private || 0}
+                    onChange={(val) => updateField('withheldVat2307Private', val)}
                     placeholder="0.00"
-                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-violet-500"
+                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-violet-500 font-medium"
                   />
                 </div>
               </div>
@@ -446,13 +574,12 @@ export const Form2550QView: React.FC<Form2550QViewProps> = ({
                 <label className="text-sm text-slate-700">Prior Payments Made (Monthly 2550M)</label>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInputField
                     id="prior-payments-2550q"
-                    type="number"
-                    value={data.priorPaymentsThisQuarter || ''}
-                    onChange={(e) => updateField('priorPaymentsThisQuarter', parseNumber(e.target.value))}
+                    value={data.priorPaymentsThisQuarter || 0}
+                    onChange={(val) => updateField('priorPaymentsThisQuarter', val)}
                     placeholder="0.00"
-                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-violet-500"
+                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-violet-500 font-medium"
                   />
                 </div>
               </div>
@@ -546,9 +673,6 @@ export const Form2550QView: React.FC<Form2550QViewProps> = ({
                     </>
                   )}
                 </button>
-                <p className="text-[11px] text-slate-500 text-center mt-1.5 leading-tight">
-                  Saves all encoded data and schedules for <strong>{quarter} {year}</strong> so amounts remain unchanged when navigating back to this quarter.
-                </p>
                 {lastSavedTime && (
                   <div className="text-[11px] text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg p-2 mt-2 text-center flex items-center justify-center gap-1.5 font-medium">
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />

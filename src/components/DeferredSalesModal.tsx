@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   X,
   Search,
@@ -11,12 +11,19 @@ import {
   Filter,
   Layers,
   ArrowRight,
+  Users,
 } from 'lucide-react';
 import { MonthIndex, ClientBranchSchedule, BirTransactionRow, SalesDeferralState } from '../types/branchVat';
+import { ClientProfile, Quarter } from '../types/tax';
+import { getTaxableYearDeferralSummary } from '../utils/deferralTracker';
+import { DeferredClientsModal } from './DeferredClientsModal';
 
 interface DeferredSalesModalProps {
   isOpen: boolean;
   onClose: () => void;
+  client?: ClientProfile;
+  year?: number;
+  quarter?: Quarter;
   allTransactions: Array<
     BirTransactionRow & {
       monthIndex: MonthIndex;
@@ -36,6 +43,9 @@ interface DeferredSalesModalProps {
 export const DeferredSalesModal: React.FC<DeferredSalesModalProps> = ({
   isOpen,
   onClose,
+  client,
+  year = 2026,
+  quarter = 'Q2' as Quarter,
   allTransactions,
   branches,
   deferralState,
@@ -43,6 +53,27 @@ export const DeferredSalesModal: React.FC<DeferredSalesModalProps> = ({
   totalActualTaxableSales,
   totalActualOutputTax,
 }) => {
+  const currentYear = year;
+  const currentQuarter: Quarter = quarter;
+
+  // Running balance across taxable year (Q1 to current quarter)
+  const deferralSummary = useMemo(() => {
+    if (!client) {
+      return {
+        accumulatedPriorTaxable: 0,
+        accumulatedPriorVatDue: 0,
+        currentQuarterTaxable: 0,
+        currentQuarterVatDue: 0,
+        totalTaxableYTD: 0,
+        totalVatDueYTD: 0,
+        deferredClientsYTD: [],
+        quarterlyBreakdown: [],
+      };
+    }
+    return getTaxableYearDeferralSummary(client.id, currentYear, currentQuarter, branches, deferralState);
+  }, [client, currentYear, currentQuarter, branches, deferralState]);
+
+  const [showDeferredClientsModal, setShowDeferredClientsModal] = useState(false);
   const [activeTab, setActiveTab] = useState<'specific' | 'manual'>('specific');
   const [selectedKeys, setSelectedKeys] = useState<string[]>(deferralState.deferredCustomerKeys || []);
   const [manualTaxable, setManualTaxable] = useState<string>(
@@ -51,12 +82,35 @@ export const DeferredSalesModal: React.FC<DeferredSalesModalProps> = ({
   const [manualVatDue, setManualVatDue] = useState<string>(
     deferralState.manualVatDue ? deferralState.manualVatDue.toString() : ''
   );
-  const [prevQuarterHideAmount, setPrevQuarterHideAmount] = useState<string>(
-    deferralState.previousQuarterHideAmount ? deferralState.previousQuarterHideAmount.toString() : ''
-  );
-  const [prevQuarterHideOutputTax, setPrevQuarterHideOutputTax] = useState<string>(
-    deferralState.previousQuarterHideOutputTax ? deferralState.previousQuarterHideOutputTax.toString() : ''
-  );
+  const [prevQuarterHideAmount, setPrevQuarterHideAmount] = useState<string>(() => {
+    if (currentQuarter === 'Q1') return '0.00';
+    if (deferralState.previousQuarterHideAmount !== undefined) {
+      return deferralState.previousQuarterHideAmount.toString();
+    }
+    return deferralSummary.accumulatedPriorTaxable > 0 ? deferralSummary.accumulatedPriorTaxable.toFixed(2) : '';
+  });
+  const [prevQuarterHideOutputTax, setPrevQuarterHideOutputTax] = useState<string>(() => {
+    if (currentQuarter === 'Q1') return '0.00';
+    if (deferralState.previousQuarterHideOutputTax !== undefined) {
+      return deferralState.previousQuarterHideOutputTax.toString();
+    }
+    return deferralSummary.accumulatedPriorVatDue > 0 ? deferralSummary.accumulatedPriorVatDue.toFixed(2) : '';
+  });
+
+  // Automatically input previous quarter deferred amount as running balance from beginning of taxable year
+  useEffect(() => {
+    if (currentQuarter === 'Q1') {
+      // Accumulation starts at beginning of taxable year; Q1 has 0 prior deferrals
+      setPrevQuarterHideAmount('0.00');
+      setPrevQuarterHideOutputTax('0.00');
+    } else {
+      // If not manually customized or matches prior calculations, ensure running balance is reflected
+      if (!deferralState.previousQuarterHideAmount && deferralSummary.accumulatedPriorTaxable > 0) {
+        setPrevQuarterHideAmount(deferralSummary.accumulatedPriorTaxable.toFixed(2));
+        setPrevQuarterHideOutputTax(deferralSummary.accumulatedPriorVatDue.toFixed(2));
+      }
+    }
+  }, [currentQuarter, deferralSummary.accumulatedPriorTaxable, deferralSummary.accumulatedPriorVatDue, deferralState.previousQuarterHideAmount]);
 
   // Filters for Specific Companies tab
   const [searchQuery, setSearchQuery] = useState('');
@@ -223,9 +277,6 @@ export const DeferredSalesModal: React.FC<DeferredSalesModalProps> = ({
               <Calculator className="w-5 h-5 text-violet-400" />
               Deferred Sales & VAT Due Management
             </h3>
-            <p className="text-xs text-slate-300 mt-1 max-w-2xl">
-              Exclude specific customer sales from the current quarter, or enter a manual Taxable Sales / VAT Due deferral amount. Manual amounts are automatically pro-rated across branches.
-            </p>
           </div>
 
           <button
@@ -433,21 +484,39 @@ export const DeferredSalesModal: React.FC<DeferredSalesModalProps> = ({
             </div>
           ) : (
             <div className="space-y-4 max-w-2xl mx-auto py-2">
-              <div className="bg-amber-50 p-4 rounded-xl border border-amber-200 text-xs text-amber-900 space-y-1">
-                <div className="font-bold flex items-center gap-1.5 text-amber-950">
-                  <Calculator className="w-4 h-4 text-amber-700" />
-                  Bi-directional Deferral Calculation:
+              {/* Button above VAT DUE (OUTPUT TAX) TO DEFER to view YTD list of deferred clients & download PDF */}
+              {client && (
+                <div className="bg-violet-50/80 border border-violet-200 rounded-xl p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-violet-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
+                      <Users className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-bold text-violet-950 uppercase tracking-wider">
+                          Deferred Clients Schedule (Taxable Year {currentYear})
+                        </span>
+                        <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-violet-200 text-violet-900">
+                          {deferralSummary.deferredClientsYTD.length} {deferralSummary.deferredClientsYTD.length === 1 ? 'Client' : 'Clients'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-violet-700 mt-0.5">
+                        View clients deferred from start of taxable year up to {currentQuarter} and download PDF
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    id="view-deferred-clients-ytd-btn"
+                    onClick={() => setShowDeferredClientsModal(true)}
+                    className="flex items-center justify-center gap-2 px-3.5 py-2 bg-violet-700 hover:bg-violet-800 active:bg-violet-900 text-white rounded-lg text-xs font-bold shadow-xs transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    <Users className="w-3.5 h-3.5" />
+                    <span>View Deferred Clients &amp; PDF</span>
+                  </button>
                 </div>
-                <p>
-                  • If you enter <strong>VAT Due to be deferred</strong>, the system works back (divided by 0.12) to calculate the corresponding <strong>Taxable Sales</strong>.
-                </p>
-                <p>
-                  • If you enter <strong>Taxable Sales to be deferred</strong>, the system works out (multiplied by 0.12) to calculate the corresponding <strong>VAT Due</strong>.
-                </p>
-                <p className="pt-1 text-slate-600 italic">
-                  The deferred amount will adjust the total taxable sales & output tax and be pro-rated across branches according to their sales shares.
-                </p>
-              </div>
+              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
                 {/* Field 1: VAT Due */}
@@ -669,6 +738,20 @@ export const DeferredSalesModal: React.FC<DeferredSalesModalProps> = ({
           </div>
         </div>
       </div>
+
+      {showDeferredClientsModal && client && (
+        <DeferredClientsModal
+          isOpen={showDeferredClientsModal}
+          onClose={() => setShowDeferredClientsModal(false)}
+          client={client}
+          year={currentYear}
+          currentQuarter={currentQuarter}
+          deferredClients={deferralSummary.deferredClientsYTD}
+          quarterlyBreakdown={deferralSummary.quarterlyBreakdown}
+          accumulatedPriorTaxable={deferralSummary.accumulatedPriorTaxable}
+          accumulatedPriorVatDue={deferralSummary.accumulatedPriorVatDue}
+        />
+      )}
     </div>
   );
 };

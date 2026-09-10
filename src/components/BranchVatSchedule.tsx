@@ -14,7 +14,9 @@ import {
 } from '../utils/excelVatTemplate';
 import { formatPHP } from '../utils/formatters';
 import { exportMultiBranchAnd2550QPdf, exportVatComparisonPdf } from '../utils/pdfExport';
+import { getPriorQuarterExcessInputVat } from '../utils/taxCalculations';
 import { DeferredSalesModal } from './DeferredSalesModal';
+import { CombinedPurchasesModal, CombinedPurchasesRow } from './CombinedPurchasesModal';
 import {
   Building,
   Plus,
@@ -57,11 +59,13 @@ interface BranchVatScheduleProps {
   data2550Q?: Data2550Q;
   onSync2550Q?: (data: {
     vatableSales: number;
+    salesToGovernment?: number;
     zeroRatedSales: number;
     vatExemptSales: number;
     inputPurchasesGoods: number;
     inputPurchasesServices: number;
     inputCapitalGoods: number;
+    priorQuarterExcessInputVat?: number;
   }) => void;
   onSync2551Q?: (data: {
     grossSales: number;
@@ -72,6 +76,14 @@ interface BranchVatScheduleProps {
     purchasesMode: PurchasesReportingMode;
     consolidatedPurchasesFile?: BirUploadedFileRecord;
     deferralState?: SalesDeferralState;
+    schedule1Computed?: {
+      vatableSales: number;
+      salesToGovernment: number;
+      zeroRatedSales: number;
+      vatExemptSales: number;
+      inputPurchasesGoods: number;
+      priorQuarterExcessInputVat?: number;
+    };
   }) => void;
 }
 
@@ -114,12 +126,14 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
   onSync2551Q,
   onBranchScheduleChange,
 }) => {
-  const isVat = formType === '2550Q';
+  const isNonVat = client.vatStatus === 'non-vat' || formType === '2551Q';
+  const isVat = !isNonVat && formType === '2550Q';
   const monthList = getMonthLabelsForQuarter(quarter);
   const storageKey = `bir_branch_schedule_${client.id}_${year}_${quarter}`;
 
   // Combined Quarterly Sales Modal state
   const [showCombinedSalesModal, setShowCombinedSalesModal] = useState(false);
+  const [showCombinedPurchasesModal, setShowCombinedPurchasesModal] = useState(false);
   const [combinedSalesFilterMonth, setCombinedSalesFilterMonth] = useState<'all' | 1 | 2 | 3>('all');
   const [combinedSalesSearchQuery, setCombinedSalesSearchQuery] = useState('');
   const [combinedSalesBranchFilter, setCombinedSalesBranchFilter] = useState<'all' | string>('all');
@@ -594,6 +608,49 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
     return list;
   }, [branches, monthList]);
 
+  // Aggregated Purchases Transactions across branches in the quarter (for Per-Branch purchases)
+  const allQuarterPurchasesTransactions = useMemo(() => {
+    const list: CombinedPurchasesRow[] = [];
+
+    (branches || []).forEach((b) => {
+      const pf = b?.purchasesFiles;
+      if (!pf) return;
+      ([1, 2, 3] as const).forEach((mIdx) => {
+        const file = pf[`month${mIdx}`];
+        if (file && Array.isArray(file.transactions) && file.transactions.length > 0) {
+          const mInfo = monthList.find((m) => m.index === mIdx);
+          file.transactions.forEach((tx) => {
+            list.push({
+              ...tx,
+              monthIndex: mIdx,
+              monthLabel: mInfo?.label || `${mIdx} Month`,
+              monthName: mInfo?.name || '',
+              branchName: b.name,
+              branchId: b.id,
+            });
+          });
+        }
+      });
+    });
+
+    return list;
+  }, [branches, monthList]);
+
+  const totalQuarterPurchasesRowCount = allQuarterPurchasesTransactions.length;
+
+  // Unique key helper for sales transactions
+  const getSalesTxKey = (tx: {
+    branchId: string;
+    monthIndex: number;
+    tin?: string;
+    rowNum: number;
+  }) => {
+    return `${tx.branchId}_${tx.monthIndex}_${tx.tin || 'NOTIN'}_${tx.rowNum}`;
+  };
+
+  const governmentKeySet = useMemo(() => new Set(governmentSalesKeys), [governmentSalesKeys]);
+  const has2307KeySet = useMemo(() => new Set(has2307SalesKeys), [has2307SalesKeys]);
+
   // Specific Deferrals from selected keys
   const deferredCustomersList = useMemo(() => {
     if (!deferralState.deferredCustomerKeys || deferralState.deferredCustomerKeys.length === 0) {
@@ -601,43 +658,124 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
     }
     const keySet = new Set(deferralState.deferredCustomerKeys);
     return allQuarterSalesTransactions.filter((tx) => {
-      const txKey = `${tx.branchId}_${tx.monthIndex}_${tx.tin || 'NOTIN'}_${tx.rowNum}`;
+      const txKey = getSalesTxKey(tx);
       return keySet.has(txKey);
     });
   }, [allQuarterSalesTransactions, deferralState.deferredCustomerKeys]);
 
-  // Per-branch specific deferrals
+  // Per-branch specific deferrals (distinguishing Government vs Regular Sales)
   const specificDeferralByBranch = useMemo(() => {
-    const map: Record<string, { taxable: number; outputTax: number; exempt: number; zeroRated: number; count: number }> = {};
+    const map: Record<
+      string,
+      {
+        taxable: number;
+        outputTax: number;
+        exempt: number;
+        zeroRated: number;
+        count: number;
+        specGovTaxable: number;
+        specGovOutputTax: number;
+        specRegularTaxable: number;
+        specRegularOutputTax: number;
+      }
+    > = {};
+
     (branches || []).forEach((b) => {
-      map[b.id] = { taxable: 0, outputTax: 0, exempt: 0, zeroRated: 0, count: 0 };
+      map[b.id] = {
+        taxable: 0,
+        outputTax: 0,
+        exempt: 0,
+        zeroRated: 0,
+        count: 0,
+        specGovTaxable: 0,
+        specGovOutputTax: 0,
+        specRegularTaxable: 0,
+        specRegularOutputTax: 0,
+      };
     });
+
     deferredCustomersList.forEach((tx) => {
       if (!map[tx.branchId]) {
-        map[tx.branchId] = { taxable: 0, outputTax: 0, exempt: 0, zeroRated: 0, count: 0 };
+        map[tx.branchId] = {
+          taxable: 0,
+          outputTax: 0,
+          exempt: 0,
+          zeroRated: 0,
+          count: 0,
+          specGovTaxable: 0,
+          specGovOutputTax: 0,
+          specRegularTaxable: 0,
+          specRegularOutputTax: 0,
+        };
       }
-      map[tx.branchId].taxable += tx.taxableAmount || 0;
-      map[tx.branchId].outputTax += tx.taxAmount || 0;
+      const tAmt = tx.taxableAmount || 0;
+      const vAmt = tx.taxAmount || 0;
+      const txKey = getSalesTxKey(tx);
+      const isGov = governmentKeySet.has(txKey);
+
+      map[tx.branchId].taxable += tAmt;
+      map[tx.branchId].outputTax += vAmt;
       map[tx.branchId].exempt += tx.exemptAmount || 0;
       map[tx.branchId].zeroRated += tx.zeroRatedAmount || 0;
       map[tx.branchId].count += 1;
+
+      if (isGov) {
+        map[tx.branchId].specGovTaxable += tAmt;
+        map[tx.branchId].specGovOutputTax += vAmt;
+      } else {
+        map[tx.branchId].specRegularTaxable += tAmt;
+        map[tx.branchId].specRegularOutputTax += vAmt;
+      }
     });
+
     return map;
-  }, [branches, deferredCustomersList]);
+  }, [branches, deferredCustomersList, governmentKeySet]);
 
   // Total specific deferrals
   const totalSpecificDeferred = useMemo(() => {
-    return deferredCustomersList.reduce(
-      (acc, tx) => ({
-        taxable: acc.taxable + (tx.taxableAmount || 0),
-        outputTax: acc.outputTax + (tx.taxAmount || 0),
-        exempt: acc.exempt + (tx.exemptAmount || 0),
-        zeroRated: acc.zeroRated + (tx.zeroRatedAmount || 0),
-        count: acc.count + 1,
-      }),
-      { taxable: 0, outputTax: 0, exempt: 0, zeroRated: 0, count: 0 }
-    );
-  }, [deferredCustomersList]);
+    let taxable = 0;
+    let outputTax = 0;
+    let exempt = 0;
+    let zeroRated = 0;
+    let count = 0;
+    let govTaxable = 0;
+    let govOutputTax = 0;
+    let regularTaxable = 0;
+    let regularOutputTax = 0;
+
+    deferredCustomersList.forEach((tx) => {
+      const txKey = getSalesTxKey(tx);
+      const isGov = governmentKeySet.has(txKey);
+      const tAmt = tx.taxableAmount || 0;
+      const vAmt = tx.taxAmount || 0;
+
+      taxable += tAmt;
+      outputTax += vAmt;
+      exempt += tx.exemptAmount || 0;
+      zeroRated += tx.zeroRatedAmount || 0;
+      count += 1;
+
+      if (isGov) {
+        govTaxable += tAmt;
+        govOutputTax += vAmt;
+      } else {
+        regularTaxable += tAmt;
+        regularOutputTax += vAmt;
+      }
+    });
+
+    return {
+      taxable,
+      outputTax,
+      exempt,
+      zeroRated,
+      count,
+      govTaxable,
+      govOutputTax,
+      regularTaxable,
+      regularOutputTax,
+    };
+  }, [deferredCustomersList, governmentKeySet]);
 
   const manualDefTaxable = deferralState.manualTaxableSales || 0;
   const manualDefOutputTax = deferralState.manualVatDue || 0;
@@ -645,7 +783,8 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
   const totalDeferredTaxable = totalSpecificDeferred.taxable + manualDefTaxable;
   const totalDeferredOutputTax = totalSpecificDeferred.outputTax + manualDefOutputTax;
 
-  const hasActiveDeferral = totalDeferredTaxable > 0 || totalDeferredOutputTax > 0 || deferredCustomersList.length > 0;
+  const hasActiveDeferral =
+    totalDeferredTaxable > 0 || totalDeferredOutputTax > 0 || deferredCustomersList.length > 0;
 
   // Aggregate Actual Totals across all branches
   // Per BIR SLSP: Row 1999 Column E = Gross, F = Exempt, G = Zero-Rated, H = Taxable (exclusive of VAT), L = Output/Input Tax
@@ -719,9 +858,56 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
     };
   }, [branches, purchasesMode, consolidatedPurchasesFile]);
 
+  // Base Sales to Government from Combined Sales Data (all transactions checked under Sales to Government)
+  const actualGovSales = useMemo(() => {
+    return allQuarterSalesTransactions.reduce((acc, tx) => {
+      const txKey = getSalesTxKey(tx);
+      return acc + (governmentKeySet.has(txKey) ? (tx.taxableAmount || 0) : 0);
+    }, 0);
+  }, [allQuarterSalesTransactions, governmentKeySet]);
+
+  const actualGovOutputTax = useMemo(() => {
+    return allQuarterSalesTransactions.reduce((acc, tx) => {
+      const txKey = getSalesTxKey(tx);
+      return acc + (governmentKeySet.has(txKey) ? (tx.taxAmount || 0) : 0);
+    }, 0);
+  }, [allQuarterSalesTransactions, governmentKeySet]);
+
+  // Base Regular Vatable Sales (taxable sales not marked as Government)
+  const actualRegularVatableSales = Math.max(0, aggregatedTotals.salesColH - actualGovSales);
+  const actualRegularOutputTax = Math.max(0, aggregatedTotals.salesColL - actualGovOutputTax);
+
+  // Deferral Logic per User Rule:
+  // 1. Sales to Government:
+  //    "Sales to Government shall not be affected by the said deferrals, only those that are not Sales to Government,
+  //     Zero Rated and VAT Exempt Sales shall be deducted by deferral, in case of generic deferral wherein there is
+  //     no specific customer to be deferred. Otherwise if such sale from the government agency has been deferred
+  //     in specific deferral then such sale is being deferred."
+  const adjustedGovSales = Math.max(0, actualGovSales - totalSpecificDeferred.govTaxable);
+  const adjustedGovOutputTax = Math.max(0, actualGovOutputTax - totalSpecificDeferred.govOutputTax);
+
+  // 2. Adjusted Grand Total Vatable Sales (Regular Vatable Sales):
+  //    Generic manual deferral deducts ONLY from regular vatable sales (excluding Government, Zero Rated, Exempt).
+  const adjustedRegularVatableSales = Math.max(
+    0,
+    actualRegularVatableSales - totalSpecificDeferred.regularTaxable - manualDefTaxable
+  );
+  const adjustedRegularOutputTax = Math.max(
+    0,
+    actualRegularOutputTax - totalSpecificDeferred.regularOutputTax - manualDefOutputTax
+  );
+
+  // 3. Zero-Rated Sales:
+  //    Based on combined sales data, unaffected by generic deferrals
+  const adjustedZeroRatedSales = Math.max(0, aggregatedTotals.salesColG - totalSpecificDeferred.zeroRated);
+
+  // 4. VAT-Exempt Sales:
+  //    Based on combined sales data, unaffected by generic deferrals
+  const adjustedVatExemptSales = Math.max(0, aggregatedTotals.salesColF - totalSpecificDeferred.exempt);
+
   // Branch-level Calculations & Pro-Rating of Deferrals
-  // - Specific customer deferrals are deducted directly from their specific branch's sales
-  // - Manual taxable sales / VAT Due deferral is pro-rated across branches based on their base taxable sales
+  // - Sales to Government are isolated from generic deferrals
+  // - Generic manual taxable sales / VAT Due deferral is pro-rated across branches strictly based on their regular taxable sales
   const branchCalculations = useMemo(() => {
     const rawBranches = (branches || []).map((b) => {
       const sFiles = [b.salesFiles?.month1, b.salesFiles?.month2, b.salesFiles?.month3].filter(Boolean);
@@ -732,6 +918,30 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
         ? sFiles.reduce((acc, f) => acc + (f?.totals?.taxAmount || 0), 0)
         : (actualSalesF + actualSalesG + actualSalesH) * 0.03;
 
+      // Government sales in this branch
+      let branchGovTaxable = 0;
+      let branchGovOutputTax = 0;
+      ([1, 2, 3] as const).forEach((mIdx) => {
+        const f = b.salesFiles?.[`month${mIdx}`];
+        if (f && Array.isArray(f.transactions)) {
+          f.transactions.forEach((tx) => {
+            const txKey = getSalesTxKey({
+              branchId: b.id,
+              monthIndex: mIdx,
+              tin: tx.tin,
+              rowNum: tx.rowNum,
+            });
+            if (governmentKeySet.has(txKey)) {
+              branchGovTaxable += tx.taxableAmount || 0;
+              branchGovOutputTax += tx.taxAmount || 0;
+            }
+          });
+        }
+      });
+
+      const branchRegularTaxable = Math.max(0, actualSalesH - branchGovTaxable);
+      const branchRegularOutputTax = Math.max(0, actualSalesL - branchGovOutputTax);
+
       const pFiles =
         purchasesMode === 'per-branch'
           ? [b.purchasesFiles?.month1, b.purchasesFiles?.month2, b.purchasesFiles?.month3].filter(Boolean)
@@ -741,7 +951,17 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
       const bPurchH = pFiles.reduce((acc, f) => acc + (f?.totals?.taxableAmount || 0), 0);
       const bPurchL = pFiles.reduce((acc, f) => acc + (f?.totals?.taxAmount || 0), 0);
 
-      const spec = specificDeferralByBranch[b.id] || { taxable: 0, outputTax: 0, exempt: 0, zeroRated: 0, count: 0 };
+      const spec = specificDeferralByBranch[b.id] || {
+        taxable: 0,
+        outputTax: 0,
+        exempt: 0,
+        zeroRated: 0,
+        count: 0,
+        specGovTaxable: 0,
+        specGovOutputTax: 0,
+        specRegularTaxable: 0,
+        specRegularOutputTax: 0,
+      };
 
       return {
         branch: b,
@@ -749,6 +969,10 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
         actualSalesG,
         actualSalesH,
         actualSalesL,
+        branchGovTaxable,
+        branchGovOutputTax,
+        branchRegularTaxable,
+        branchRegularOutputTax,
         bPurchF,
         bPurchG,
         bPurchH,
@@ -757,34 +981,58 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
         specOutputTax: spec.outputTax,
         specExempt: spec.exempt,
         specZeroRated: spec.zeroRated,
+        specGovTaxable: spec.specGovTaxable,
+        specGovOutputTax: spec.specGovOutputTax,
+        specRegularTaxable: spec.specRegularTaxable,
+        specRegularOutputTax: spec.specRegularOutputTax,
         specCount: spec.count,
       };
     });
 
-    const sumBaseTaxable = rawBranches.reduce((acc, rb) => acc + Math.max(0, rb.actualSalesH - rb.specTaxable), 0);
-    const totalActualSalesH = rawBranches.reduce((acc, rb) => acc + rb.actualSalesH, 0);
+    // Sum of net regular taxable across branches available to absorb generic deferrals
+    const sumBaseRegularTaxable = rawBranches.reduce(
+      (acc, rb) => acc + Math.max(0, rb.branchRegularTaxable - rb.specRegularTaxable),
+      0
+    );
+    const totalActualRegularTaxable = rawBranches.reduce((acc, rb) => acc + rb.branchRegularTaxable, 0);
 
     return rawBranches.map((rb) => {
-      const baseTaxable = Math.max(0, rb.actualSalesH - rb.specTaxable);
+      const baseRegularTaxable = Math.max(0, rb.branchRegularTaxable - rb.specRegularTaxable);
       let manualRatio = 0;
-      if (sumBaseTaxable > 0) {
-        manualRatio = baseTaxable / sumBaseTaxable;
-      } else if (totalActualSalesH > 0) {
-        manualRatio = rb.actualSalesH / totalActualSalesH;
+      if (sumBaseRegularTaxable > 0) {
+        manualRatio = baseRegularTaxable / sumBaseRegularTaxable;
+      } else if (totalActualRegularTaxable > 0) {
+        manualRatio = rb.branchRegularTaxable / totalActualRegularTaxable;
       } else if (rawBranches.length > 0) {
         manualRatio = 1 / rawBranches.length;
       }
 
+      // Generic deferrals pro-rated ONLY against regular vatable sales
       const proRatedManualTaxable = manualDefTaxable * manualRatio;
       const proRatedManualOutputTax = manualDefOutputTax * manualRatio;
 
-      const totalBranchDefTaxable = rb.specTaxable + proRatedManualTaxable;
-      const totalBranchDefOutputTax = rb.specOutputTax + proRatedManualOutputTax;
+      // Adjusted government sales (affected only by specific government deferrals)
+      const adjustedGovTaxable = Math.max(0, rb.branchGovTaxable - rb.specGovTaxable);
+      const adjustedGovOutputTax = Math.max(0, rb.branchGovOutputTax - rb.specGovOutputTax);
 
-      const adjustedSalesH = Math.max(0, rb.actualSalesH - totalBranchDefTaxable);
-      const adjustedSalesL = Math.max(0, rb.actualSalesL - totalBranchDefOutputTax);
+      // Adjusted regular vatable sales (reduced by specific regular deferral and pro-rated manual generic deferral)
+      const adjustedRegularTaxable = Math.max(
+        0,
+        rb.branchRegularTaxable - rb.specRegularTaxable - proRatedManualTaxable
+      );
+      const adjustedRegularOutputTax = Math.max(
+        0,
+        rb.branchRegularOutputTax - rb.specRegularOutputTax - proRatedManualOutputTax
+      );
+
+      // Total adjusted taxable sales (Col H) & output tax (Col L)
+      const adjustedSalesH = adjustedRegularTaxable + adjustedGovTaxable;
+      const adjustedSalesL = adjustedRegularOutputTax + adjustedGovOutputTax;
       const adjustedSalesF = Math.max(0, rb.actualSalesF - rb.specExempt);
       const adjustedSalesG = Math.max(0, rb.actualSalesG - rb.specZeroRated);
+
+      const totalBranchDefTaxable = rb.specTaxable + proRatedManualTaxable;
+      const totalBranchDefOutputTax = rb.specOutputTax + proRatedManualOutputTax;
 
       const actualNetVat = rb.actualSalesL - rb.bPurchL;
       const adjustedNetVat = adjustedSalesL - rb.bPurchL;
@@ -795,6 +1043,10 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
         proRatedManualOutputTax,
         totalBranchDefTaxable,
         totalBranchDefOutputTax,
+        adjustedGovTaxable,
+        adjustedGovOutputTax,
+        adjustedRegularTaxable,
+        adjustedRegularOutputTax,
         adjustedSalesF,
         adjustedSalesG,
         adjustedSalesH,
@@ -803,7 +1055,15 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
         adjustedNetVat,
       };
     });
-  }, [branches, isVat, purchasesMode, specificDeferralByBranch, manualDefTaxable, manualDefOutputTax]);
+  }, [
+    branches,
+    isVat,
+    purchasesMode,
+    specificDeferralByBranch,
+    manualDefTaxable,
+    manualDefOutputTax,
+    governmentKeySet,
+  ]);
 
   // Adjusted Totals (Aggregation rollup reflecting deferrals)
   const adjustedTotals = useMemo(() => {
@@ -844,31 +1104,89 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
   // Active totals based on summaryViewMode ('actual' vs 'adjusted')
   const displayTotals = summaryViewMode === 'adjusted' ? adjustedTotals : aggregatedTotals;
 
+  // Active category breakdowns for BIR Schedule 1
+  const displayVatableSales =
+    summaryViewMode === 'adjusted' ? adjustedRegularVatableSales : actualRegularVatableSales;
+  const displayGovSales = summaryViewMode === 'adjusted' ? adjustedGovSales : actualGovSales;
+  const displayZeroRatedSales =
+    summaryViewMode === 'adjusted' ? adjustedZeroRatedSales : aggregatedTotals.salesColG;
+  const displayVatExemptSales =
+    summaryViewMode === 'adjusted' ? adjustedVatExemptSales : aggregatedTotals.salesColF;
+
+  // Computed Prior Quarter's Excess Input Tax (based on previous Quarter VAT Due only if negative, otherwise 0)
+  const priorQuarterExcessInfo = useMemo(
+    () => getPriorQuarterExcessInputVat(client.id, quarter, year),
+    [client.id, quarter, year]
+  );
+
   // Handle Sync to Active Form
   const handleSyncToForm = () => {
     if (isVat && onSync2550Q) {
       onSync2550Q({
-        vatableSales: displayTotals.salesColH,
-        zeroRatedSales: displayTotals.salesColG,
-        vatExemptSales: displayTotals.salesColF,
+        vatableSales: displayVatableSales,
+        salesToGovernment: displayGovSales,
+        zeroRatedSales: displayZeroRatedSales,
+        vatExemptSales: displayVatExemptSales,
         inputPurchasesGoods: displayTotals.purchasesColH,
         inputPurchasesServices: 0,
         inputCapitalGoods: 0,
+        priorQuarterExcessInputVat: priorQuarterExcessInfo.excessInputVat,
       });
       setSyncSuccessMsg(
-        `Successfully synced ${summaryViewMode === 'adjusted' ? 'Adjusted' : 'Actual'} multi-branch figures (Taxable: ${formatPHP(displayTotals.salesColH)}, Output Tax: ${formatPHP(displayTotals.salesColL)}) to BIR Form 2550Q!`
+        `Successfully synced from all Data to BIR Form 2550Q Schedules 1 & 2! Output Taxable Sales: ${formatPHP(
+          displayTotals.salesColH
+        )} | Purchases: ${formatPHP(displayTotals.purchasesColH)} | Prior Quarter Excess Input Tax: ${formatPHP(
+          priorQuarterExcessInfo.excessInputVat
+        )}.`
       );
     } else if (!isVat && onSync2551Q) {
+      const totalGrossSales = displayTotals.salesColF + displayTotals.salesColG + displayTotals.salesColH;
       onSync2551Q({
-        grossSales: displayTotals.salesColH,
+        grossSales: totalGrossSales,
         exemptSales: displayTotals.salesColF,
       });
       setSyncSuccessMsg(
-        `Successfully synced ${summaryViewMode === 'adjusted' ? 'Adjusted' : 'Actual'} multi-branch Sales to BIR Form 2551Q!`
+        `Successfully synced from all Data to BIR Form 2551Q! Gross Sales: ${formatPHP(
+          totalGrossSales
+        )} | Exempt: ${formatPHP(displayTotals.salesColF)} | Taxable (3% Base): ${formatPHP(
+          displayTotals.salesColH
+        )}.`
       );
     }
-    setTimeout(() => setSyncSuccessMsg(null), 4000);
+    setTimeout(() => setSyncSuccessMsg(null), 4500);
   };
+
+  // Synchronize computed Schedule 1 and 2 data to parent component
+  useEffect(() => {
+    if (onBranchScheduleChange) {
+      onBranchScheduleChange({
+        branches,
+        purchasesMode,
+        consolidatedPurchasesFile: consolidatedPurchasesFile || undefined,
+        deferralState,
+        schedule1Computed: {
+          vatableSales: displayVatableSales,
+          salesToGovernment: displayGovSales,
+          zeroRatedSales: displayZeroRatedSales,
+          vatExemptSales: displayVatExemptSales,
+          inputPurchasesGoods: displayTotals.purchasesColH,
+          priorQuarterExcessInputVat: priorQuarterExcessInfo.excessInputVat,
+        },
+      });
+    }
+  }, [
+    branches,
+    purchasesMode,
+    consolidatedPurchasesFile,
+    deferralState,
+    displayVatableSales,
+    displayGovSales,
+    displayZeroRatedSales,
+    displayVatExemptSales,
+    displayTotals.purchasesColH,
+    priorQuarterExcessInfo.excessInputVat,
+    onBranchScheduleChange,
+  ]);
 
   // Handle PDF Export
   const handleExportPdf = async () => {
@@ -951,19 +1269,6 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
   const totalQuarterSalesRowCount = useMemo(() => {
     return allQuarterSalesTransactions.length;
   }, [allQuarterSalesTransactions]);
-
-  // Unique key helper for sales transactions
-  const getSalesTxKey = (tx: {
-    branchId: string;
-    monthIndex: number;
-    tin?: string;
-    rowNum: number;
-  }) => {
-    return `${tx.branchId}_${tx.monthIndex}_${tx.tin || 'NOTIN'}_${tx.rowNum}`;
-  };
-
-  const governmentKeySet = useMemo(() => new Set(governmentSalesKeys), [governmentSalesKeys]);
-  const has2307KeySet = useMemo(() => new Set(has2307SalesKeys), [has2307SalesKeys]);
 
   // Unique Customer list across all quarter sales transactions for dropdown filtering
   const uniqueCustomerList = useMemo(() => {
@@ -1299,10 +1604,14 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
             id="sync-branch-totals-btn"
             onClick={handleSyncToForm}
             className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold bg-violet-600 hover:bg-violet-500 text-white rounded-lg transition-colors shadow-xs"
-            title={`Transfer aggregated branch figures directly into BIR Form ${formType}`}
+            title={
+              isVat
+                ? 'Transfer aggregated figures directly into BIR Form 2550Q Schedules 1 and 2'
+                : 'Transfer aggregated sales figures directly into BIR Form 2551Q'
+            }
           >
-            <Check className="w-3.5 h-3.5" />
-            <span>Sync to {formType}</span>
+            <ArrowRightLeft className="w-3.5 h-3.5" />
+            <span>Sync from all Data</span>
           </button>
 
           {/* Toggle expand/collapse */}
@@ -1336,7 +1645,7 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
           {/* Top Control Bar: Branch Structure Toggle, Branch Counter & Add Branch + Purchases Mode Selector */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-center p-4 bg-slate-50 rounded-xl border border-slate-200">
             {/* Branch Structure Selection (No branch vs. Has branches) & Add Branch */}
-            <div className="lg:col-span-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className={`${isVat ? 'lg:col-span-6' : 'lg:col-span-12'} flex flex-col sm:flex-row sm:items-center justify-between gap-3`}>
               <div className="space-y-1">
                 <div className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
                   <Building className="w-3.5 h-3.5 text-violet-600" />
@@ -1388,46 +1697,48 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
               )}
             </div>
 
-            {/* Purchases Reporting Mode */}
-            <div className="lg:col-span-6 flex flex-col sm:flex-row sm:items-center justify-between lg:justify-end gap-3 border-t lg:border-t-0 pt-3 lg:pt-0 border-slate-200">
-              <span className="text-xs font-medium text-slate-600 flex items-center gap-1.5">
-                <ArrowRightLeft className="w-3.5 h-3.5 text-slate-400" />
-                Purchases Filing Mode:
-              </span>
+            {/* Purchases Reporting Mode (Only for VAT Clients) */}
+            {isVat && (
+              <div className="lg:col-span-6 flex flex-col sm:flex-row sm:items-center justify-between lg:justify-end gap-3 border-t lg:border-t-0 pt-3 lg:pt-0 border-slate-200">
+                <span className="text-xs font-medium text-slate-600 flex items-center gap-1.5">
+                  <ArrowRightLeft className="w-3.5 h-3.5 text-slate-400" />
+                  Purchases Filing Mode:
+                </span>
 
-              <div className="inline-flex bg-slate-200/80 p-0.5 rounded-lg text-xs font-medium">
-                <button
-                  type="button"
-                  id="purchases-mode-consolidated-btn"
-                  onClick={() => setPurchasesMode('consolidated')}
-                  className={`px-3 py-1.5 rounded-md transition-all ${
-                    purchasesMode === 'consolidated'
-                      ? 'bg-white text-slate-900 shadow-xs font-semibold'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                  title="Upload 1 consolidated Excel file for all purchases across all branches"
-                >
-                  📦 Consolidated (1 File)
-                </button>
-                <button
-                  type="button"
-                  id="purchases-mode-per-branch-btn"
-                  onClick={() => setPurchasesMode('per-branch')}
-                  className={`px-3 py-1.5 rounded-md transition-all ${
-                    purchasesMode === 'per-branch'
-                      ? 'bg-white text-slate-900 shadow-xs font-semibold'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                  title="Upload separate monthly Excel files (Months 1, 2, 3) for each branch"
-                >
-                  🏢 Per Branch (3 Files/Branch)
-                </button>
+                <div className="inline-flex bg-slate-200/80 p-0.5 rounded-lg text-xs font-medium">
+                  <button
+                    type="button"
+                    id="purchases-mode-consolidated-btn"
+                    onClick={() => setPurchasesMode('consolidated')}
+                    className={`px-3 py-1.5 rounded-md transition-all ${
+                      purchasesMode === 'consolidated'
+                        ? 'bg-white text-slate-900 shadow-xs font-semibold'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                    title="Upload 1 consolidated Excel file for all purchases across all branches"
+                  >
+                    📦 Consolidated (1 File)
+                  </button>
+                  <button
+                    type="button"
+                    id="purchases-mode-per-branch-btn"
+                    onClick={() => setPurchasesMode('per-branch')}
+                    className={`px-3 py-1.5 rounded-md transition-all ${
+                      purchasesMode === 'per-branch'
+                        ? 'bg-white text-slate-900 shadow-xs font-semibold'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                    title="Upload separate monthly Excel files (Months 1, 2, 3) for each branch"
+                  >
+                    🏢 Per Branch (3 Files/Branch)
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
-          {/* Consolidated Purchases Section (Shown when Consolidated Purchases is Active) */}
-          {purchasesMode === 'consolidated' && (
+          {/* Consolidated Purchases Section (Shown when is VAT and Consolidated Purchases is Active) */}
+          {isVat && purchasesMode === 'consolidated' && (
             <div className="p-4 bg-amber-50/50 border border-amber-200/80 rounded-xl space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
@@ -1620,7 +1931,7 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
                                 }`}
                               >
                                 {salesCount}/3 Sales
-                                {purchasesMode === 'per-branch' ? ` • ${purchasesCount}/3 Purch` : ''}
+                                {isVat && purchasesMode === 'per-branch' ? ` • ${purchasesCount}/3 Purch` : ''}
                               </span>
                             </button>
 
@@ -1884,13 +2195,34 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
               </div>
             </div>
 
-            {/* Purchases Upload Slots (Only shown if Purchases Mode is Per-Branch) */}
-            {purchasesMode === 'per-branch' && (
+            {/* Purchases Upload Slots (Only shown if is VAT and Purchases Mode is Per-Branch) */}
+            {isVat && purchasesMode === 'per-branch' && (
               <div className="space-y-3 pt-2">
-                <div className="flex items-center justify-between">
-                  <div className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-amber-600 inline-block" />
-                    PURCHASES IN THE QUARTER
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <div className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-amber-600 inline-block" />
+                      PURCHASES IN THE QUARTER
+                    </div>
+
+                    {/* View Combined Purchases Data Button */}
+                    <button
+                      type="button"
+                      id="open-combined-purchases-modal-btn"
+                      onClick={() => setShowCombinedPurchasesModal(true)}
+                      className="flex items-center gap-1.5 px-3 py-1 text-xs font-semibold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg shadow-2xs transition-all cursor-pointer"
+                      title="View combined purchases across all branches in the quarter"
+                    >
+                      <Layers className="w-3.5 h-3.5 text-amber-600" />
+                      <span>View Combined Purchases Data</span>
+                      {totalQuarterPurchasesRowCount > 0 ? (
+                        <span className="px-1.5 py-0.2 text-[10px] bg-amber-600 text-white font-mono font-bold rounded-full">
+                          {totalQuarterPurchasesRowCount}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-amber-600 font-normal">(Popup)</span>
+                      )}
+                    </button>
                   </div>
                 </div>
 
@@ -2005,14 +2337,15 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
             )}
           </div>
 
-          {/* Consolidated Rollup Summary Table */}
-          <div className="pt-4 border-t border-slate-200 space-y-3">
+          {/* Consolidated Rollup Summary Table (VAT TABLE - Only for VAT Clients) */}
+          {isVat && (
+            <div className="pt-4 border-t border-slate-200 space-y-3">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
               <div className="flex items-center gap-2.5 flex-wrap">
                 <div className="flex items-center gap-2">
                   <Table className="w-4 h-4 text-violet-600" />
                   <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wide">
-                    Multi-Branch Aggregation Summary ({quarter} {year})
+                    VAT TABLE
                   </h4>
                 </div>
 
@@ -2066,7 +2399,7 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
                   onClick={handleExportPdf}
                   disabled={isExportingPdf}
                   className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-violet-700 hover:bg-violet-800 text-white rounded-lg shadow-xs transition-colors cursor-pointer disabled:opacity-60 whitespace-nowrap"
-                  title="Download landscape PDF containing Multi-Branch Aggregation Summary, Schedules 1 to 3, and Form 2550Q VAT Summary"
+                  title="Download landscape PDF containing VAT TABLE, Schedules 1 to 3, and Form 2550Q VAT Summary"
                 >
                   {isExportingPdf ? (
                     <>
@@ -2346,9 +2679,6 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
                         </span>
                       )}
                     </div>
-                    <p className="text-[11px] text-slate-500">
-                      Exclude specific customer sales from the current quarter, or input manual Taxable Sales / VAT Due to be pro-rated across branches.
-                    </p>
                   </div>
                 </div>
 
@@ -2421,7 +2751,208 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
                 </div>
               )}
             </div>
+
+            {/* BIR Form 2550Q Schedule 1 & 2 Integration Breakdown Card */}
+            {isVat && (
+              <div className="mt-3 p-4 bg-white border border-slate-200 rounded-xl shadow-2xs space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-slate-100">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-violet-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
+                      <Table className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                        <span>BIR Form 2550Q Schedules 1 &amp; 2 Sync Summary</span>
+                        <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-violet-100 text-violet-800">
+                          {summaryViewMode === 'adjusted' ? 'Adjusted Figures' : 'Actual Figures'}
+                        </span>
+                      </h4>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    id="sync-breakdown-to-2550q-btn"
+                    onClick={handleSyncToForm}
+                    className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-violet-700 hover:bg-violet-800 text-white rounded-lg shadow-xs transition-colors cursor-pointer whitespace-nowrap self-start sm:self-auto"
+                    title="Sync all data to Form 2550Q Schedules 1 and 2"
+                  >
+                    <ArrowRightLeft className="w-3.5 h-3.5" />
+                    <span>Sync from all Data</span>
+                  </button>
+                </div>
+
+                {/* Schedule 1 Breakdown */}
+                <div>
+                  <div className="text-[11px] font-bold text-slate-600 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-violet-600"></span>
+                    <span>Schedule 1: Output Taxable Sales Breakdown</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    {/* Vatable Sales */}
+                    <div className="p-3 bg-violet-50/70 border border-violet-200/80 rounded-lg">
+                      <div className="text-[11px] font-bold text-violet-950 uppercase tracking-wide">
+                        Vatable Sales / Receipts (12%)
+                      </div>
+                      <div className="text-lg font-bold font-mono text-violet-800 mt-1">
+                        {formatPHP(displayVatableSales)}
+                      </div>
+                    </div>
+
+                    {/* Sales to Government */}
+                    <div className="p-3 bg-emerald-50/70 border border-emerald-200/80 rounded-lg">
+                      <div className="text-[11px] font-bold text-emerald-950 uppercase tracking-wide flex items-center justify-between">
+                        <span>Sales to Government (12%)</span>
+                        <span className="text-[10px] font-bold px-1.5 py-0.2 bg-emerald-200 text-emerald-800 rounded-full">
+                          {governmentSalesSummary.count} checked
+                        </span>
+                      </div>
+                      <div className="text-lg font-bold font-mono text-emerald-800 mt-1">
+                        {formatPHP(displayGovSales)}
+                      </div>
+                    </div>
+
+                    {/* Zero-Rated Sales */}
+                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                      <div className="text-[11px] font-bold text-slate-800 uppercase tracking-wide">
+                        Zero-Rated Sales (0%)
+                      </div>
+                      <div className="text-lg font-bold font-mono text-slate-700 mt-1">
+                        {formatPHP(displayZeroRatedSales)}
+                      </div>
+                    </div>
+
+                    {/* VAT-Exempt Sales */}
+                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                      <div className="text-[11px] font-bold text-slate-800 uppercase tracking-wide">
+                        VAT-Exempt Sales
+                      </div>
+                      <div className="text-lg font-bold font-mono text-slate-700 mt-1">
+                        {formatPHP(displayVatExemptSales)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Schedule 2 Breakdown */}
+                <div className="pt-2 border-t border-slate-100">
+                  <div className="text-[11px] font-bold text-slate-600 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
+                    <span>Schedule 2: Purchases &amp; Allowable Input Tax Breakdown</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {/* Domestic Purchases of Goods */}
+                    <div className="p-3 bg-blue-50/70 border border-blue-200/80 rounded-lg">
+                      <div className="text-[11px] font-bold text-blue-950 uppercase tracking-wide flex items-center justify-between">
+                        <span>Domestic Purchases of Goods</span>
+                        <span className="text-[10px] font-mono text-blue-700 font-semibold">
+                          Input Tax: {formatPHP(displayTotals.purchasesColL)}
+                        </span>
+                      </div>
+                      <div className="text-lg font-bold font-mono text-blue-800 mt-1">
+                        {formatPHP(displayTotals.purchasesColH)}
+                      </div>
+                    </div>
+
+                    {/* Prior Quarter's Excess Input Tax */}
+                    <div className="p-3 bg-amber-50/70 border border-amber-200/80 rounded-lg">
+                      <div className="text-[11px] font-bold text-amber-950 uppercase tracking-wide flex items-center justify-between">
+                        <span>Prior Quarter's Excess Input Tax</span>
+                        <span
+                          className={`text-[10px] font-bold px-1.5 py-0.2 rounded-full ${
+                            priorQuarterExcessInfo.excessInputVat > 0
+                              ? 'bg-amber-200 text-amber-900'
+                              : 'bg-slate-200 text-slate-700'
+                          }`}
+                        >
+                          {priorQuarterExcessInfo.excessInputVat > 0 ? 'Negative Prev VAT Due' : '₱0.00 (Not Negative)'}
+                        </span>
+                      </div>
+                      <div className="text-lg font-bold font-mono text-amber-800 mt-1">
+                        {formatPHP(priorQuarterExcessInfo.excessInputVat)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
+        )}
+
+        {/* BIR Form 2551Q Sales Sync Summary Card (Only for Non-VAT Clients) */}
+        {!isVat && (
+          <div className="pt-4 border-t border-slate-200">
+            <div className="p-4 bg-white border border-slate-200 rounded-xl shadow-2xs space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-slate-100">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-amber-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
+                    <FileSpreadsheet className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                      <span>BIR Form 2551Q Percentage Tax Sales Sync</span>
+                      <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-amber-100 text-amber-800">
+                        {quarter} {year}
+                      </span>
+                    </h4>
+                    <p className="text-[11px] text-slate-500">
+                      Aggregated branch sales ready to transfer directly to Form 2551Q
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  id="sync-breakdown-to-2551q-btn"
+                  onClick={handleSyncToForm}
+                  className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-lg shadow-xs transition-colors cursor-pointer whitespace-nowrap self-start sm:self-auto"
+                  title="Sync gross and exempt sales to BIR Form 2551Q"
+                >
+                  <ArrowRightLeft className="w-3.5 h-3.5" />
+                  <span>Sync to Form 2551Q</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                  <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                    Total Gross Sales
+                  </div>
+                  <div className="text-base font-bold font-mono text-slate-900 mt-1">
+                    {formatPHP(displayTotals.salesColF + displayTotals.salesColG + displayTotals.salesColH)}
+                  </div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">
+                    Aggregated from all monthly sales files
+                  </div>
+                </div>
+
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                  <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                    Exempt Sales
+                  </div>
+                  <div className="text-base font-bold font-mono text-slate-700 mt-1">
+                    {formatPHP(displayTotals.salesColF)}
+                  </div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">
+                    Non-taxable percentage tax sales
+                  </div>
+                </div>
+
+                <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-lg">
+                  <div className="text-[11px] font-semibold text-amber-800 uppercase tracking-wider">
+                    Taxable Base Sales (3%)
+                  </div>
+                  <div className="text-base font-bold font-mono text-amber-900 mt-1">
+                    {formatPHP(displayTotals.salesColH)}
+                  </div>
+                  <div className="text-[10px] text-amber-700 mt-0.5 font-medium">
+                    Est. 3% Tax: {formatPHP(displayTotals.salesColH * 0.03)}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         </div>
       )}
 
@@ -3283,7 +3814,7 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
                         <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-[11px] flex items-start gap-2">
                           <AlertCircle className="w-4 h-4 shrink-0 text-amber-600 mt-0.5" />
                           <span>
-                            Warning: <strong>{salesCount} Sales</strong> {purchasesMode === 'per-branch' ? `and ${purchCount} Purchases ` : ''}file(s) associated with this branch will be permanently removed.
+                            Warning: <strong>{salesCount} Sales</strong> {isVat && purchasesMode === 'per-branch' ? `and ${purchCount} Purchases ` : ''}file(s) associated with this branch will be permanently removed.
                           </span>
                         </div>
                       );
@@ -3333,6 +3864,9 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
         <DeferredSalesModal
           isOpen={showDeferralModal}
           onClose={() => setShowDeferralModal(false)}
+          client={client}
+          year={year}
+          quarter={quarter}
           allTransactions={allQuarterSalesTransactions}
           branches={branches}
           deferralState={deferralState}
@@ -3347,6 +3881,17 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
           totalActualOutputTax={aggregatedTotals.salesColL}
         />
       )}
+
+      {/* Combined Purchases Modal (Per-Branch) */}
+      <CombinedPurchasesModal
+        isOpen={showCombinedPurchasesModal}
+        onClose={() => setShowCombinedPurchasesModal(false)}
+        client={client}
+        quarter={quarter}
+        year={year}
+        branches={branches}
+        allTransactions={allQuarterPurchasesTransactions}
+      />
     </div>
   );
 };

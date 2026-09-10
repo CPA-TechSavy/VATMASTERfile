@@ -151,6 +151,21 @@ export const INITIAL_DATA_1702Q: Record<string, Data1702Q> = {
 };
 
 export const INITIAL_DATA_2550Q: Record<string, Data2550Q> = {
+  // Previous quarter (Q4 2025) for client-2 where VAT Due was negative (-48,000)
+  'client-2_2025_Q4': {
+    vatableSales: 1000000,
+    salesToGovernment: 0,
+    zeroRatedSales: 0,
+    vatExemptSales: 0,
+    inputPurchasesGoods: 1400000, // 1,400,000 * 0.12 = 168,000 input vs 120,000 output -> Net VAT Due = -48,000
+    inputPurchasesServices: 0,
+    inputCapitalGoods: 0,
+    inputImportations: 0,
+    priorQuarterExcessInputVat: 0,
+    withheldVat2307Govt: 0,
+    withheldVat2307Private: 0,
+    priorPaymentsThisQuarter: 0,
+  },
   'client-2': {
     vatableSales: 4850000,
     salesToGovernment: 350000,
@@ -162,6 +177,21 @@ export const INITIAL_DATA_2550Q: Record<string, Data2550Q> = {
     inputImportations: 0,
     priorQuarterExcessInputVat: 48000,
     withheldVat2307Govt: 17500, // 5% withholding on govt sales
+    withheldVat2307Private: 0,
+    priorPaymentsThisQuarter: 0,
+  },
+  // Previous quarter (Q4 2025) for client-5 where VAT Due was negative (-15,000)
+  'client-5_2025_Q4': {
+    vatableSales: 2000000,
+    salesToGovernment: 0,
+    zeroRatedSales: 0,
+    vatExemptSales: 0,
+    inputPurchasesGoods: 2125000, // 2,125,000 * 0.12 = 255,000 input vs 240,000 output -> Net VAT Due = -15,000
+    inputPurchasesServices: 0,
+    inputCapitalGoods: 0,
+    inputImportations: 0,
+    priorQuarterExcessInputVat: 0,
+    withheldVat2307Govt: 0,
     withheldVat2307Private: 0,
     priorPaymentsThisQuarter: 0,
   },
