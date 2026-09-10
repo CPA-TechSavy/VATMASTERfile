@@ -19,6 +19,7 @@ import {
   INITIAL_DATA_1601EQ,
 } from './data/defaultClients';
 import { ClientHeader } from './components/ClientHeader';
+import { getRealTimeTaxPeriod } from './utils/taxCalculations';
 import { ClientModal } from './components/ClientModal';
 import { Form1701QView } from './components/Form1701QView';
 import { Form1702QView } from './components/Form1702QView';
@@ -76,10 +77,10 @@ export default function App() {
     return clients[0]?.id || 'client-1';
   });
 
-  // Active period
-  const [year, setYear] = useState<number>(2025);
-  const [quarter, setQuarter] = useState<Quarter>('Q3');
-  const [month, setMonth] = useState<number>(9); // Sept
+  // Active period - follows the real time date
+  const [year, setYear] = useState<number>(() => getRealTimeTaxPeriod().year);
+  const [quarter, setQuarter] = useState<Quarter>(() => getRealTimeTaxPeriod().quarter);
+  const [month, setMonth] = useState<number>(() => getRealTimeTaxPeriod().month);
 
   // Active tab
   const [activeTab, setActiveTab] = useState<FormTab>('summary');
@@ -468,9 +469,26 @@ export default function App() {
         onOpenEditClient={handleOpenEditClient}
         onDeleteClient={() => handleDeleteClient(activeClientId)}
         quarter={quarter}
-        onSelectQuarter={setQuarter}
+        onSelectQuarter={(q) => {
+          setQuarter(q);
+          const quarterMonthMap: Record<Quarter, number[]> = {
+            Q1: [1, 2, 3],
+            Q2: [4, 5, 6],
+            Q3: [7, 8, 9],
+            Q4: [10, 11, 12],
+          };
+          if (!quarterMonthMap[q].includes(month)) {
+            setMonth(quarterMonthMap[q][0]);
+          }
+        }}
         month={month}
-        onSelectMonth={setMonth}
+        onSelectMonth={(m) => {
+          setMonth(m);
+          if (m >= 1 && m <= 3) setQuarter('Q1');
+          else if (m >= 4 && m <= 6) setQuarter('Q2');
+          else if (m >= 7 && m <= 9) setQuarter('Q3');
+          else setQuarter('Q4');
+        }}
         year={year}
         onSelectYear={setYear}
         onExportData={handleExportData}

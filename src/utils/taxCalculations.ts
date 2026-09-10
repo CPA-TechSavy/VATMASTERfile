@@ -656,3 +656,31 @@ export function computeMonthlyQuarterBreakdown({
   };
 }
 
+/**
+ * Calculates current real-time Taxable Year, Quarter, and Month based on local system date.
+ * - Q1: January - March (Months 1, 2, 3)
+ * - Q2: April - June (Months 4, 5, 6)
+ * - Q3: July - September (Months 7, 8, 9)
+ * - Q4: October - December (Months 10, 11, 12)
+ */
+export function getRealTimeTaxPeriod(): {
+  year: number;
+  quarter: Quarter;
+  month: number;
+} {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1; // 1 to 12
+  let quarter: Quarter = 'Q1';
+  if (month >= 1 && month <= 3) {
+    quarter = 'Q1';
+  } else if (month >= 4 && month <= 6) {
+    quarter = 'Q2';
+  } else if (month >= 7 && month <= 9) {
+    quarter = 'Q3';
+  } else {
+    quarter = 'Q4';
+  }
+  return { year, quarter, month };
+}
+

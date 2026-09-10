@@ -73,6 +73,8 @@ export interface SalesDeferralState {
   deferredCustomerKeys: string[]; // unique IDs of transactions from Combined Sales Data
   manualTaxableSales: number; // manual taxable sales deferred
   manualVatDue: number; // manual VAT Due / Output Tax deferred
+  previousQuarterHideAmount?: number; // Previous quarter hide amount (Taxable Sales)
+  previousQuarterHideOutputTax?: number; // Previous quarter hide amount (Output VAT)
 }
 
 export interface SalesDeferralSummary {
@@ -84,4 +86,6 @@ export interface SalesDeferralSummary {
   totalDeferredTaxable: number;
   totalDeferredOutputTax: number;
   specificCount: number;
+  previousQuarterHideAmount?: number;
+  previousQuarterHideOutputTax?: number;
 }

@@ -1,21 +1,15 @@
-import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Data2550Q, ClientProfile, Quarter } from '../types/tax';
-import { calculate2550Q, computeMonthlyQuarterBreakdown } from '../utils/taxCalculations';
+import { calculate2550Q } from '../utils/taxCalculations';
 import { formatPHP, parseNumber } from '../utils/formatters';
 import {
   AlertTriangle,
-  Download,
-  FileText,
-  Loader2,
-  Table as TableIcon,
   Save,
   CheckCircle2,
   Check,
 } from 'lucide-react';
 import { PenaltiesModal } from './PenaltiesModal';
-import { downloadBirSlspExcelTemplate } from '../utils/excelVatTemplate';
 import { BranchVatSchedule } from './BranchVatSchedule';
-import { exportMultiBranchAnd2550QPdf } from '../utils/pdfExport';
 import {
   ClientBranchSchedule,
   PurchasesReportingMode,
@@ -38,7 +32,6 @@ export const Form2550QView: React.FC<Form2550QViewProps> = ({
   onChange,
 }) => {
   const [showPenalties, setShowPenalties] = useState(false);
-  const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [saveSuccessMessage, setSaveSuccessMessage] = useState(false);
 
   // Dedicated explicit quarterly persistence key
@@ -162,15 +155,6 @@ export const Form2550QView: React.FC<Form2550QViewProps> = ({
     []
   );
 
-  const monthlyBreakdown = useMemo(() => {
-    return computeMonthlyQuarterBreakdown({
-      quarter,
-      branches: branchScheduleState.branches,
-      purchasesMode: branchScheduleState.purchasesMode,
-      consolidatedPurchasesFile: branchScheduleState.consolidatedPurchasesFile,
-    });
-  }, [quarter, branchScheduleState]);
-
   const result = calculate2550Q(data);
 
   const handleSaveQuarterData = () => {
@@ -207,23 +191,6 @@ export const Form2550QView: React.FC<Form2550QViewProps> = ({
     }, 4000);
   };
 
-  const handleExportPdf = async () => {
-    try {
-      setIsExportingPdf(true);
-      await exportMultiBranchAnd2550QPdf({
-        client,
-        quarter,
-        year,
-        data2550Q: data,
-        result2550Q: result,
-      });
-    } catch (err) {
-      console.error('Failed to export PDF', err);
-    } finally {
-      setIsExportingPdf(false);
-    }
-  };
-
   const updateField = (field: keyof Data2550Q, value: any) => {
     onChange({
       ...data,
@@ -250,16 +217,6 @@ export const Form2550QView: React.FC<Form2550QViewProps> = ({
     });
   };
 
-  const handleDownloadTemplate = () => {
-    downloadBirSlspExcelTemplate({
-      type: 'Sales',
-      quarter,
-      monthLabel: '1st Month',
-      client,
-      includeSampleRow: true,
-    });
-  };
-
   return (
     <div className="space-y-6">
       {/* Main Header Banner */}
@@ -277,38 +234,6 @@ export const Form2550QView: React.FC<Form2550QViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Download Landscape PDF Form Button */}
-          <button
-            id="download-pdf-summary-2550q-header-btn"
-            onClick={handleExportPdf}
-            disabled={isExportingPdf}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-violet-700 hover:bg-violet-800 text-white rounded-lg transition-colors shadow-xs disabled:opacity-60 cursor-pointer"
-            title="Download Landscape PDF of Multi-Branch Aggregation Summary, Schedules 1 to 3, and Form 2550Q VAT Summary"
-          >
-            {isExportingPdf ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                <span>Exporting PDF...</span>
-              </>
-            ) : (
-              <>
-                <FileText className="w-3.5 h-3.5" />
-                <span>Download PDF Summary (Landscape)</span>
-              </>
-            )}
-          </button>
-
-          {/* Download Template Button */}
-          <button
-            id="download-vat-template-btn"
-            onClick={handleDownloadTemplate}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg transition-colors shadow-xs"
-            title="Download formatted BIR SLSP Excel template (.xlsx)"
-          >
-            <Download className="w-3.5 h-3.5 text-violet-400" />
-            <span>Download Template</span>
-          </button>
-
           <button
             id="open-penalties-2550q-btn"
             onClick={() => setShowPenalties(true)}
@@ -333,186 +258,6 @@ export const Form2550QView: React.FC<Form2550QViewProps> = ({
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         <div className="lg:col-span-7 space-y-6">
-          {/* Monthly Consolidated Sales & Purchases Breakdown Table (Above Schedule 1) */}
-          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-3.5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-lg bg-violet-100 flex items-center justify-center text-violet-700">
-                  <TableIcon className="w-4 h-4" />
-                </div>
-                <div>
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-900">
-                    Monthly Consolidated Sales & Purchases ({quarter} {year})
-                  </h4>
-                  <p className="text-[11px] text-slate-500">
-                    Consolidates all branches for each month of the quarter: Taxable, Exempt, Zero-Rated Sales/Purchases & VAT
-                  </p>
-                </div>
-              </div>
-              <span className="px-2.5 py-0.5 text-[10px] font-semibold bg-violet-50 text-violet-700 border border-violet-200 rounded-full">
-                Monthly Aggregation
-              </span>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse min-w-[650px]">
-                <thead>
-                  <tr className="bg-slate-100 text-slate-700 font-semibold border-b border-slate-200">
-                    <th rowSpan={2} className="py-2.5 px-3 border-r border-slate-200 align-middle">
-                      Quarter Month
-                    </th>
-                    <th colSpan={4} className="py-2 px-3 text-center bg-violet-50 text-violet-900 border-r border-violet-200">
-                      SALES (OUTPUT TAX)
-                    </th>
-                    <th colSpan={4} className="py-2 px-3 text-center bg-amber-50 text-amber-900 border-r border-amber-200">
-                      PURCHASES (INPUT TAX)
-                    </th>
-                    <th rowSpan={2} className="py-2.5 px-3 text-right bg-slate-50 text-slate-900 align-middle">
-                      NET VAT
-                    </th>
-                  </tr>
-                  <tr className="bg-slate-50 text-[11px] font-medium text-slate-600 border-b border-slate-200">
-                    {/* Sales Subheaders */}
-                    <th className="py-1.5 px-2 text-right bg-violet-50/50">Taxable (12%)</th>
-                    <th className="py-1.5 px-2 text-right bg-violet-50/50">Exempt</th>
-                    <th className="py-1.5 px-2 text-right bg-violet-50/50">Zero-Rated</th>
-                    <th className="py-1.5 px-2 text-right bg-violet-100/70 text-violet-800 font-bold border-r border-violet-200">
-                      Output VAT
-                    </th>
-
-                    {/* Purchases Subheaders */}
-                    <th className="py-1.5 px-2 text-right bg-amber-50/50">Taxable (12%)</th>
-                    <th className="py-1.5 px-2 text-right bg-amber-50/50">Exempt</th>
-                    <th className="py-1.5 px-2 text-right bg-amber-50/50">Zero-Rated</th>
-                    <th className="py-1.5 px-2 text-right bg-amber-100/70 text-amber-800 font-bold border-r border-amber-200">
-                      Input VAT
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 font-mono text-xs">
-                  {(monthlyBreakdown?.months || monthlyBreakdown?.monthlyBreakdown || []).map((m) => (
-                    <tr key={m.monthIndex} className="hover:bg-slate-50 transition-colors">
-                      <td className="py-2 px-3 font-sans font-medium text-slate-900 border-r border-slate-200">
-                        <span className="font-bold">{m.monthLabel}</span>
-                        <span className="text-slate-500 font-normal ml-1">({m.monthName})</span>
-                      </td>
-
-                      {/* Sales */}
-                      <td className="py-2 px-2 text-right text-slate-800">
-                        {formatPHP(m.salesTaxable ?? m.taxableSales ?? 0)}
-                      </td>
-                      <td className="py-2 px-2 text-right text-slate-600">
-                        {(m.salesExempt ?? m.exemptSales ?? 0) ? formatPHP(m.salesExempt ?? m.exemptSales ?? 0) : '—'}
-                      </td>
-                      <td className="py-2 px-2 text-right text-slate-600">
-                        {(m.salesZeroRated ?? m.zeroRatedSales ?? 0)
-                          ? formatPHP(m.salesZeroRated ?? m.zeroRatedSales ?? 0)
-                          : '—'}
-                      </td>
-                      <td className="py-2 px-2 text-right font-bold text-violet-700 bg-violet-50/20 border-r border-violet-200">
-                        {formatPHP(m.salesOutputTax ?? m.outputTax ?? 0)}
-                      </td>
-
-                      {/* Purchases */}
-                      <td className="py-2 px-2 text-right text-slate-800">
-                        {formatPHP(m.purchasesTaxable ?? m.taxablePurchases ?? 0)}
-                      </td>
-                      <td className="py-2 px-2 text-right text-slate-600">
-                        {(m.purchasesExempt ?? m.exemptPurchases ?? 0)
-                          ? formatPHP(m.purchasesExempt ?? m.exemptPurchases ?? 0)
-                          : '—'}
-                      </td>
-                      <td className="py-2 px-2 text-right text-slate-600">
-                        {(m.purchasesZeroRated ?? m.zeroRatedPurchases ?? 0)
-                          ? formatPHP(m.purchasesZeroRated ?? m.zeroRatedPurchases ?? 0)
-                          : '—'}
-                      </td>
-                      <td className="py-2 px-2 text-right font-bold text-amber-700 bg-amber-50/20 border-r border-amber-200">
-                        {formatPHP(m.purchasesInputTax ?? m.inputTax ?? 0)}
-                      </td>
-
-                      {/* Net */}
-                      <td className="py-2 px-3 text-right font-bold text-slate-900 bg-slate-50/50">
-                        {formatPHP(m.netVat ?? 0)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot className="bg-slate-100 font-mono text-xs font-bold border-t-2 border-slate-300">
-                  <tr>
-                    <td className="py-2.5 px-3 font-sans uppercase text-slate-800 border-r border-slate-200">
-                      Quarter Total
-                    </td>
-                    {/* Sales Totals */}
-                    <td className="py-2.5 px-2 text-right text-slate-900">
-                      {formatPHP(
-                        monthlyBreakdown?.quarterTotals?.salesTaxable ??
-                          monthlyBreakdown?.quarterTotals?.taxableSales ??
-                          0
-                      )}
-                    </td>
-                    <td className="py-2.5 px-2 text-right text-slate-700">
-                      {formatPHP(
-                        monthlyBreakdown?.quarterTotals?.salesExempt ??
-                          monthlyBreakdown?.quarterTotals?.exemptSales ??
-                          0
-                      )}
-                    </td>
-                    <td className="py-2.5 px-2 text-right text-slate-700">
-                      {formatPHP(
-                        monthlyBreakdown?.quarterTotals?.salesZeroRated ??
-                          monthlyBreakdown?.quarterTotals?.zeroRatedSales ??
-                          0
-                      )}
-                    </td>
-                    <td className="py-2.5 px-2 text-right text-violet-800 bg-violet-100/50 border-r border-violet-200">
-                      {formatPHP(
-                        monthlyBreakdown?.quarterTotals?.salesOutputTax ??
-                          monthlyBreakdown?.quarterTotals?.outputTax ??
-                          0
-                      )}
-                    </td>
-
-                    {/* Purchases Totals */}
-                    <td className="py-2.5 px-2 text-right text-slate-900">
-                      {formatPHP(
-                        monthlyBreakdown?.quarterTotals?.purchasesTaxable ??
-                          monthlyBreakdown?.quarterTotals?.taxablePurchases ??
-                          0
-                      )}
-                    </td>
-                    <td className="py-2.5 px-2 text-right text-slate-700">
-                      {formatPHP(
-                        monthlyBreakdown?.quarterTotals?.purchasesExempt ??
-                          monthlyBreakdown?.quarterTotals?.exemptPurchases ??
-                          0
-                      )}
-                    </td>
-                    <td className="py-2.5 px-2 text-right text-slate-700">
-                      {formatPHP(
-                        monthlyBreakdown?.quarterTotals?.purchasesZeroRated ??
-                          monthlyBreakdown?.quarterTotals?.zeroRatedPurchases ??
-                          0
-                      )}
-                    </td>
-                    <td className="py-2.5 px-2 text-right text-amber-800 bg-amber-100/50 border-r border-amber-200">
-                      {formatPHP(
-                        monthlyBreakdown?.quarterTotals?.purchasesInputTax ??
-                          monthlyBreakdown?.quarterTotals?.inputTax ??
-                          0
-                      )}
-                    </td>
-
-                    {/* Net Total */}
-                    <td className="py-2.5 px-3 text-right text-slate-950 bg-slate-200/50">
-                      {formatPHP(monthlyBreakdown?.quarterTotals?.netVat ?? 0)}
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          </div>
-
           {/* Output Taxable Sales */}
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
             <div className="text-xs font-bold uppercase tracking-wider text-slate-500">

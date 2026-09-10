@@ -13,7 +13,7 @@ import {
   parseBirSlspExcelFile,
 } from '../utils/excelVatTemplate';
 import { formatPHP } from '../utils/formatters';
-import { exportMultiBranchAnd2550QPdf } from '../utils/pdfExport';
+import { exportMultiBranchAnd2550QPdf, exportVatComparisonPdf } from '../utils/pdfExport';
 import { DeferredSalesModal } from './DeferredSalesModal';
 import {
   Building,
@@ -40,6 +40,13 @@ import {
   Loader2,
   Search,
   Calculator,
+  Landmark,
+  CheckSquare,
+  Square,
+  Filter,
+  Sparkles,
+  Tag,
+  CheckCheck,
 } from 'lucide-react';
 
 interface BranchVatScheduleProps {
@@ -116,6 +123,38 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
   const [combinedSalesFilterMonth, setCombinedSalesFilterMonth] = useState<'all' | 1 | 2 | 3>('all');
   const [combinedSalesSearchQuery, setCombinedSalesSearchQuery] = useState('');
   const [combinedSalesBranchFilter, setCombinedSalesBranchFilter] = useState<'all' | string>('all');
+  const [combinedSalesCustomerFilter, setCombinedSalesCustomerFilter] = useState<string>('all');
+  const [combinedSalesTagFilter, setCombinedSalesTagFilter] = useState<'all' | 'govt' | '2307' | 'both' | 'none'>('all');
+  const [checklistFeedbackMsg, setChecklistFeedbackMsg] = useState<{ text: string; type: 'success' | 'info' } | null>(null);
+
+  // Sales Checklist state: Government Sales & 2307 Certificates (persisted per client/quarter)
+  const [governmentSalesKeys, setGovernmentSalesKeys] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed.governmentSalesKeys)) return parsed.governmentSalesKeys;
+        if (parsed.salesChecklist?.governmentSalesKeys) return parsed.salesChecklist.governmentSalesKeys;
+      }
+    } catch (e) {
+      console.error('Failed to load government sales keys', e);
+    }
+    return [];
+  });
+
+  const [has2307SalesKeys, setHas2307SalesKeys] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed.has2307SalesKeys)) return parsed.has2307SalesKeys;
+        if (parsed.salesChecklist?.has2307SalesKeys) return parsed.salesChecklist.has2307SalesKeys;
+      }
+    } catch (e) {
+      console.error('Failed to load 2307 sales keys', e);
+    }
+    return [];
+  });
 
   // Branches state
   const [branches, setBranches] = useState<ClientBranchSchedule[]>(() => {
@@ -221,6 +260,7 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [isExportingComparisonPdf, setIsExportingComparisonPdf] = useState(false);
 
   const checkScrollState = () => {
     const el = tabsContainerRef.current;
@@ -280,7 +320,7 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
 
   const lastEmittedScheduleStateRef = useRef<string>('');
 
-  // Save to localStorage whenever branches, purchasesMode, consolidatedPurchasesFile, hasBranches, or deferralState changes
+  // Save to localStorage whenever branches, purchasesMode, consolidatedPurchasesFile, hasBranches, deferralState, or checklist tags change
   useEffect(() => {
     try {
       const payload = {
@@ -289,6 +329,8 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
         consolidatedPurchasesFile,
         hasBranches,
         deferralState,
+        governmentSalesKeys,
+        has2307SalesKeys,
       };
       const serialized = JSON.stringify(payload);
       localStorage.setItem(storageKey, serialized);
@@ -306,7 +348,7 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
     } catch (e) {
       console.error('Failed to persist branch schedule', e);
     }
-  }, [branches, purchasesMode, consolidatedPurchasesFile, hasBranches, deferralState, storageKey]);
+  }, [branches, purchasesMode, consolidatedPurchasesFile, hasBranches, deferralState, governmentSalesKeys, has2307SalesKeys, storageKey]);
 
   // Sync activeBranchId if list changes
   useEffect(() => {
@@ -869,20 +911,176 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
     }
   };
 
+  // Handle Comparison PDF Export (Actual vs Adjusted + Deferrals Summary)
+  const handleExportComparisonPdf = async () => {
+    try {
+      setIsExportingComparisonPdf(true);
+      await exportVatComparisonPdf({
+        client,
+        quarter,
+        year,
+        branches,
+        purchasesMode,
+        consolidatedPurchasesFile,
+        branchCalculations,
+        actualTotals: aggregatedTotals,
+        adjustedTotals,
+        deferredCustomersList,
+        manualDefTaxable,
+        manualDefOutputTax,
+        totalDeferredTaxable,
+        totalDeferredOutputTax,
+        previousQuarterHideAmount: deferralState.previousQuarterHideAmount || 0,
+        previousQuarterHideOutputTax: deferralState.previousQuarterHideOutputTax || 0,
+      });
+      setSyncSuccessMsg(
+        'VAT Comparison Schedule PDF (Actual vs. Adjusted with Deferrals Summary) generated and downloaded successfully.'
+      );
+      setTimeout(() => setSyncSuccessMsg(null), 5000);
+    } catch (err) {
+      console.error('Failed to export VAT comparison PDF', err);
+      setUploadErrorMsg('Failed to generate VAT Comparison PDF. Please try again.');
+      setTimeout(() => setUploadErrorMsg(null), 5000);
+    } finally {
+      setIsExportingComparisonPdf(false);
+    }
+  };
+
   const activeBranch = branches.find((b) => b.id === activeBranchId) || branches[0];
 
   const totalQuarterSalesRowCount = useMemo(() => {
     return allQuarterSalesTransactions.length;
   }, [allQuarterSalesTransactions]);
 
+  // Unique key helper for sales transactions
+  const getSalesTxKey = (tx: {
+    branchId: string;
+    monthIndex: number;
+    tin?: string;
+    rowNum: number;
+  }) => {
+    return `${tx.branchId}_${tx.monthIndex}_${tx.tin || 'NOTIN'}_${tx.rowNum}`;
+  };
+
+  const governmentKeySet = useMemo(() => new Set(governmentSalesKeys), [governmentSalesKeys]);
+  const has2307KeySet = useMemo(() => new Set(has2307SalesKeys), [has2307SalesKeys]);
+
+  // Unique Customer list across all quarter sales transactions for dropdown filtering
+  const uniqueCustomerList = useMemo(() => {
+    const map = new Map<
+      string,
+      { name: string; count: number; totalGross: number; totalTaxable: number; govtCount: number; cert2307Count: number }
+    >();
+
+    allQuarterSalesTransactions.forEach((tx) => {
+      const cleanName = (tx.registeredName || '').trim();
+      const key = cleanName.toLowerCase() || 'unnamed';
+      const displayName = cleanName || 'Unnamed Customer / Individual';
+      const txKey = getSalesTxKey(tx);
+      const isGov = governmentKeySet.has(txKey);
+      const is2307 = has2307KeySet.has(txKey);
+
+      const existing = map.get(key);
+      if (existing) {
+        existing.count += 1;
+        existing.totalGross += tx.grossAmount || 0;
+        existing.totalTaxable += tx.taxableAmount || 0;
+        if (isGov) existing.govtCount += 1;
+        if (is2307) existing.cert2307Count += 1;
+      } else {
+        map.set(key, {
+          name: displayName,
+          count: 1,
+          totalGross: tx.grossAmount || 0,
+          totalTaxable: tx.taxableAmount || 0,
+          govtCount: isGov ? 1 : 0,
+          cert2307Count: is2307 ? 1 : 0,
+        });
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [allQuarterSalesTransactions, governmentKeySet, has2307KeySet]);
+
+  // Totals for all quarter transactions marked as Government Sales
+  const governmentSalesSummary = useMemo(() => {
+    let count = 0;
+    let taxable = 0;
+    let outputTax = 0;
+    let gross = 0;
+    allQuarterSalesTransactions.forEach((tx) => {
+      if (governmentKeySet.has(getSalesTxKey(tx))) {
+        count += 1;
+        taxable += tx.taxableAmount || 0;
+        outputTax += tx.taxAmount || 0;
+        gross += tx.grossAmount || 0;
+      }
+    });
+    return {
+      count,
+      taxable,
+      outputTax,
+      gross,
+      withheld5Pct: taxable * 0.05, // 5% Standard Final Withholding VAT
+    };
+  }, [allQuarterSalesTransactions, governmentKeySet]);
+
+  // Totals for all quarter transactions marked as having Form 2307 Certificates
+  const has2307SalesSummary = useMemo(() => {
+    let count = 0;
+    let taxable = 0;
+    let outputTax = 0;
+    let gross = 0;
+    allQuarterSalesTransactions.forEach((tx) => {
+      if (has2307KeySet.has(getSalesTxKey(tx))) {
+        count += 1;
+        taxable += tx.taxableAmount || 0;
+        outputTax += tx.taxAmount || 0;
+        gross += tx.grossAmount || 0;
+      }
+    });
+    return {
+      count,
+      taxable,
+      outputTax,
+      gross,
+    };
+  }, [allQuarterSalesTransactions, has2307KeySet]);
+
+  // Filtered Combined Sales with Customer Name, Month, Branch, Checklist Tag, and Search filter
   const filteredCombinedSales = useMemo(() => {
     return allQuarterSalesTransactions.filter((tx) => {
+      const txKey = getSalesTxKey(tx);
+
+      // Month filter
       if (combinedSalesFilterMonth !== 'all' && tx.monthIndex !== combinedSalesFilterMonth) {
         return false;
       }
+      // Branch filter
       if (combinedSalesBranchFilter !== 'all' && tx.branchId !== combinedSalesBranchFilter) {
         return false;
       }
+      // Customer filter
+      if (combinedSalesCustomerFilter !== 'all') {
+        const txName = (tx.registeredName || '').trim().toLowerCase();
+        if (txName !== combinedSalesCustomerFilter.trim().toLowerCase()) {
+          return false;
+        }
+      }
+      // Status tag filter
+      if (combinedSalesTagFilter === 'govt' && !governmentKeySet.has(txKey)) {
+        return false;
+      }
+      if (combinedSalesTagFilter === '2307' && !has2307KeySet.has(txKey)) {
+        return false;
+      }
+      if (combinedSalesTagFilter === 'both' && (!governmentKeySet.has(txKey) || !has2307KeySet.has(txKey))) {
+        return false;
+      }
+      if (combinedSalesTagFilter === 'none' && (governmentKeySet.has(txKey) || has2307KeySet.has(txKey))) {
+        return false;
+      }
+      // Free text search query
       if (combinedSalesSearchQuery.trim()) {
         const q = combinedSalesSearchQuery.toLowerCase();
         const matchName = tx.registeredName?.toLowerCase().includes(q);
@@ -892,7 +1090,16 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
       }
       return true;
     });
-  }, [allQuarterSalesTransactions, combinedSalesFilterMonth, combinedSalesBranchFilter, combinedSalesSearchQuery]);
+  }, [
+    allQuarterSalesTransactions,
+    combinedSalesFilterMonth,
+    combinedSalesBranchFilter,
+    combinedSalesCustomerFilter,
+    combinedSalesTagFilter,
+    combinedSalesSearchQuery,
+    governmentKeySet,
+    has2307KeySet,
+  ]);
 
   const combinedSalesTotals = useMemo(() => {
     return filteredCombinedSales.reduce(
@@ -906,6 +1113,153 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
       { grossAmount: 0, exemptAmount: 0, zeroRatedAmount: 0, taxableAmount: 0, taxAmount: 0 }
     );
   }, [filteredCombinedSales]);
+
+  // Counts of checked rows within currently filtered transactions
+  const filteredGovtCheckedCount = useMemo(() => {
+    return filteredCombinedSales.filter((tx) => governmentKeySet.has(getSalesTxKey(tx))).length;
+  }, [filteredCombinedSales, governmentKeySet]);
+
+  const isAllFilteredGovtChecked =
+    filteredCombinedSales.length > 0 && filteredGovtCheckedCount === filteredCombinedSales.length;
+  const isSomeFilteredGovtChecked =
+    filteredGovtCheckedCount > 0 && filteredGovtCheckedCount < filteredCombinedSales.length;
+
+  const filtered2307CheckedCount = useMemo(() => {
+    return filteredCombinedSales.filter((tx) => has2307KeySet.has(getSalesTxKey(tx))).length;
+  }, [filteredCombinedSales, has2307KeySet]);
+
+  const isAllFiltered2307Checked =
+    filteredCombinedSales.length > 0 && filtered2307CheckedCount === filteredCombinedSales.length;
+  const isSomeFiltered2307Checked =
+    filtered2307CheckedCount > 0 && filtered2307CheckedCount < filteredCombinedSales.length;
+
+  // Individual toggle handlers
+  const toggleGovernmentKey = (key: string) => {
+    setGovernmentSalesKeys((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
+    );
+  };
+
+  const toggle2307Key = (key: string) => {
+    setHas2307SalesKeys((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
+    );
+  };
+
+  // Bulk actions on filtered transactions
+  const handleToggleAllFilteredGovernment = (check: boolean) => {
+    const keysInFilter = filteredCombinedSales.map(getSalesTxKey);
+    if (check) {
+      setGovernmentSalesKeys((prev) => Array.from(new Set([...prev, ...keysInFilter])));
+      setChecklistFeedbackMsg({
+        text: `Checked ${keysInFilter.length} transaction(s) as Government sales.`,
+        type: 'success',
+      });
+    } else {
+      const toRemove = new Set(keysInFilter);
+      setGovernmentSalesKeys((prev) => prev.filter((k) => !toRemove.has(k)));
+      setChecklistFeedbackMsg({
+        text: `Unchecked ${keysInFilter.length} transaction(s) from Government sales.`,
+        type: 'info',
+      });
+    }
+  };
+
+  const handleToggleAllFiltered2307 = (check: boolean) => {
+    const keysInFilter = filteredCombinedSales.map(getSalesTxKey);
+    if (check) {
+      setHas2307SalesKeys((prev) => Array.from(new Set([...prev, ...keysInFilter])));
+      setChecklistFeedbackMsg({
+        text: `Checked ${keysInFilter.length} transaction(s) as having Form 2307 Certificates.`,
+        type: 'success',
+      });
+    } else {
+      const toRemove = new Set(keysInFilter);
+      setHas2307SalesKeys((prev) => prev.filter((k) => !toRemove.has(k)));
+      setChecklistFeedbackMsg({
+        text: `Unchecked ${keysInFilter.length} transaction(s) from 2307 Certificates.`,
+        type: 'info',
+      });
+    }
+  };
+
+  const handleCheckAllFilteredBoth = () => {
+    const keysInFilter = filteredCombinedSales.map(getSalesTxKey);
+    setGovernmentSalesKeys((prev) => Array.from(new Set([...prev, ...keysInFilter])));
+    setHas2307SalesKeys((prev) => Array.from(new Set([...prev, ...keysInFilter])));
+    setChecklistFeedbackMsg({
+      text: `Checked all ${keysInFilter.length} filtered transaction(s) as BOTH Government & 2307 Certificates.`,
+      type: 'success',
+    });
+  };
+
+  // Smart Auto-detection for Government entities
+  const handleAutoDetectGovernment = () => {
+    const govtKeywords = [
+      'govt',
+      'government',
+      'deped',
+      'department of',
+      'dept of',
+      'dpwh',
+      'doh',
+      'dost',
+      'dswd',
+      'dilg',
+      'dotr',
+      'bureau of',
+      'bir',
+      'boc',
+      'municipality of',
+      'city of',
+      'province of',
+      'barangay',
+      'brgy',
+      'state university',
+      'lgu',
+      'gocc',
+      'gsis',
+      'sss',
+      'philhealth',
+      'pag-ibig',
+      'commission on',
+      'national food authority',
+      'neda',
+      'hospital of',
+      'memorial medical',
+    ];
+
+    const detectedKeys: string[] = [];
+    allQuarterSalesTransactions.forEach((tx) => {
+      const name = (tx.registeredName || '').toLowerCase();
+      const isGov = govtKeywords.some((kw) => name.includes(kw));
+      if (isGov) {
+        detectedKeys.push(getSalesTxKey(tx));
+      }
+    });
+
+    if (detectedKeys.length > 0) {
+      setGovernmentSalesKeys((prev) => Array.from(new Set([...prev, ...detectedKeys])));
+      setChecklistFeedbackMsg({
+        text: `Auto-detected and tagged ${detectedKeys.length} Government transaction(s).`,
+        type: 'success',
+      });
+    } else {
+      setChecklistFeedbackMsg({
+        text: `No standard government agency keywords found in customer names. You can filter by customer and check manually.`,
+        type: 'info',
+      });
+    }
+  };
+
+  const handleClearAllChecklistTags = () => {
+    setGovernmentSalesKeys([]);
+    setHas2307SalesKeys([]);
+    setChecklistFeedbackMsg({
+      text: `Cleared all Government and Form 2307 tags for this quarter.`,
+      type: 'info',
+    });
+  };
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
@@ -940,28 +1294,6 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Download PDF Form Button in schedule header */}
-          <button
-            type="button"
-            id="download-pdf-schedule-header-btn"
-            onClick={handleExportPdf}
-            disabled={isExportingPdf}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-slate-800/90 hover:bg-slate-700 text-slate-100 rounded-lg transition-colors border border-slate-600/80 shadow-2xs disabled:opacity-60 cursor-pointer"
-            title="Download Landscape PDF of Multi-Branch Aggregation Summary, Schedules 1-3, and Form 2550Q VAT Summary"
-          >
-            {isExportingPdf ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-violet-300" />
-                <span>Exporting PDF...</span>
-              </>
-            ) : (
-              <>
-                <FileText className="w-3.5 h-3.5 text-violet-300" />
-                <span>Export PDF (Landscape)</span>
-              </>
-            )}
-          </button>
-
           {/* Quick sync button */}
           <button
             id="sync-branch-totals-btn"
@@ -1405,7 +1737,10 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
                     onClick={() => {
                       setCombinedSalesBranchFilter('all');
                       setCombinedSalesFilterMonth('all');
+                      setCombinedSalesCustomerFilter('all');
+                      setCombinedSalesTagFilter('all');
                       setCombinedSalesSearchQuery('');
+                      setChecklistFeedbackMsg(null);
                       setShowCombinedSalesModal(true);
                     }}
                     className="flex items-center gap-1.5 px-3 py-1 text-xs font-semibold bg-violet-50 hover:bg-violet-100 text-violet-700 border border-violet-200 rounded-lg shadow-2xs transition-all cursor-pointer"
@@ -1419,6 +1754,24 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
                       </span>
                     ) : (
                       <span className="text-[10px] text-violet-500 font-normal">(Popup)</span>
+                    )}
+                    {governmentSalesSummary.count > 0 && (
+                      <span
+                        className="px-1.5 py-0.2 text-[10px] bg-emerald-600 text-white font-bold rounded-full flex items-center gap-0.5"
+                        title={`${governmentSalesSummary.count} tagged Government Sales`}
+                      >
+                        <Landmark className="w-2.5 h-2.5" />
+                        {governmentSalesSummary.count}
+                      </span>
+                    )}
+                    {has2307SalesSummary.count > 0 && (
+                      <span
+                        className="px-1.5 py-0.2 text-[10px] bg-amber-600 text-white font-bold rounded-full flex items-center gap-0.5"
+                        title={`${has2307SalesSummary.count} tagged 2307 Certificates`}
+                      >
+                        <FileText className="w-2.5 h-2.5" />
+                        {has2307SalesSummary.count}
+                      </span>
                     )}
                   </button>
                 </div>
@@ -1703,22 +2056,16 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
                     )}
                   </button>
                 </div>
-
-                {summaryViewMode === 'adjusted' && hasActiveDeferral && (
-                  <span className="text-[11px] px-2 py-0.5 bg-violet-100 text-violet-800 rounded-full font-medium flex items-center gap-1 border border-violet-200">
-                    <span className="w-1.5 h-1.5 rounded-full bg-violet-600 animate-pulse" />
-                    Adjusted Basis: -{formatPHP(totalDeferredTaxable)} Sales (-{formatPHP(totalDeferredOutputTax)} VAT)
-                  </span>
-                )}
               </div>
 
-              <div className="flex items-center gap-2.5 flex-wrap">
+              {/* Both Download Buttons Side by Side (Never stacking, Never changing position) */}
+              <div className="flex items-center gap-2 shrink-0 flex-nowrap">
                 <button
                   type="button"
                   id="download-pdf-summary-btn"
                   onClick={handleExportPdf}
                   disabled={isExportingPdf}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-violet-700 hover:bg-violet-800 text-white rounded-lg shadow-xs transition-colors cursor-pointer disabled:opacity-60"
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-violet-700 hover:bg-violet-800 text-white rounded-lg shadow-xs transition-colors cursor-pointer disabled:opacity-60 whitespace-nowrap"
                   title="Download landscape PDF containing Multi-Branch Aggregation Summary, Schedules 1 to 3, and Form 2550Q VAT Summary"
                 >
                   {isExportingPdf ? (
@@ -1729,14 +2076,32 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
                   ) : (
                     <>
                       <FileText className="w-3.5 h-3.5" />
-                      <span>Download PDF Summary ({summaryViewMode === 'adjusted' ? 'Adjusted' : 'Actual'})</span>
+                      <span>Download PDF Summary</span>
                     </>
                   )}
                 </button>
 
-                <div className="text-xs text-slate-500 hidden md:flex items-center gap-1">
-                  <span>← Scroll horizontally to view all columns →</span>
-                </div>
+                {/* Download VAT Comparison PDF (Actual vs Adjusted with Deferrals) */}
+                <button
+                  type="button"
+                  id="download-comparison-pdf-btn"
+                  onClick={handleExportComparisonPdf}
+                  disabled={isExportingComparisonPdf}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-xs transition-colors cursor-pointer disabled:opacity-60 whitespace-nowrap"
+                  title="Download Comparison PDF containing Actual VAT Table, Adjusted VAT Table, and Summary of Deferrals"
+                >
+                  {isExportingComparisonPdf ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Generating Comparison...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Download Comparison PDF</span>
+                    </>
+                  )}
+                </button>
               </div>
             </div>
 
@@ -2202,48 +2567,133 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
                 <span className="font-mono font-bold text-slate-900 text-sm">
                   {filteredCombinedSales.length}
                 </span>
-              </div>
-              <div className="bg-white p-2.5 rounded-lg border border-slate-200">
-                <span className="text-slate-500 block text-[11px]">Total Gross Sales:</span>
-                <span className="font-mono font-bold text-slate-900 text-sm">
-                  {formatPHP(combinedSalesTotals.grossAmount)}
+                <span className="text-[10px] text-slate-400 block truncate">
+                  of {allQuarterSalesTransactions.length} total txns
                 </span>
               </div>
               <div className="bg-white p-2.5 rounded-lg border border-slate-200">
-                <span className="text-slate-500 block text-[11px]">Taxable Sales (12%):</span>
-                <span className="font-mono font-bold text-slate-900 text-sm">
-                  {formatPHP(combinedSalesTotals.taxableAmount)}
+                <span className="text-slate-500 block text-[11px]">Total Gross Sales:</span>
+                <span className="font-mono font-bold text-slate-900 text-sm truncate block" title={formatPHP(combinedSalesTotals.grossAmount)}>
+                  {formatPHP(combinedSalesTotals.grossAmount)}
+                </span>
+                <span className="text-[10px] text-slate-400 block truncate">
+                  Taxable: {formatPHP(combinedSalesTotals.taxableAmount)}
                 </span>
               </div>
               <div className="bg-white p-2.5 rounded-lg border border-violet-200 bg-violet-50/30">
                 <span className="text-violet-700 block text-[11px] font-semibold">Output VAT (12%):</span>
-                <span className="font-mono font-bold text-violet-700 text-sm">
+                <span className="font-mono font-bold text-violet-700 text-sm truncate block" title={formatPHP(combinedSalesTotals.taxAmount)}>
                   {formatPHP(combinedSalesTotals.taxAmount)}
                 </span>
-              </div>
-              <div className="bg-white p-2.5 rounded-lg border border-slate-200">
-                <span className="text-slate-500 block text-[11px]">Exempt Sales:</span>
-                <span className="font-mono font-bold text-slate-700 text-sm">
-                  {formatPHP(combinedSalesTotals.exemptAmount)}
+                <span className="text-[10px] text-violet-600 block">
+                  Quarterly 12% liability
                 </span>
               </div>
+              {/* Checklist Tag: Government Sales Card */}
+              <div
+                onClick={() => setCombinedSalesTagFilter(combinedSalesTagFilter === 'govt' ? 'all' : 'govt')}
+                className={`p-2.5 rounded-lg border transition-all cursor-pointer ${
+                  combinedSalesTagFilter === 'govt'
+                    ? 'bg-emerald-100/70 border-emerald-400 ring-2 ring-emerald-500/20'
+                    : 'bg-emerald-50/50 hover:bg-emerald-100/50 border-emerald-200'
+                }`}
+                title="Click to filter by Government Sales"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-emerald-800 font-semibold text-[11px] flex items-center gap-1">
+                    <Landmark className="w-3 h-3 text-emerald-700" />
+                    Gov't Sales
+                  </span>
+                  <span className="px-1.5 py-0.2 bg-emerald-600 text-white font-mono text-[10px] font-bold rounded-full">
+                    {governmentSalesSummary.count}
+                  </span>
+                </div>
+                <div className="font-mono font-bold text-emerald-950 text-sm mt-0.5 truncate" title={formatPHP(governmentSalesSummary.taxable)}>
+                  {formatPHP(governmentSalesSummary.taxable)}
+                </div>
+                <div className="text-[10px] text-emerald-700 truncate" title={`5% Withheld VAT: ${formatPHP(governmentSalesSummary.withheld5Pct)}`}>
+                  5% Withheld: {formatPHP(governmentSalesSummary.withheld5Pct)}
+                </div>
+              </div>
+              {/* Checklist Tag: Form 2307 Certificates Card */}
+              <div
+                onClick={() => setCombinedSalesTagFilter(combinedSalesTagFilter === '2307' ? 'all' : '2307')}
+                className={`p-2.5 rounded-lg border transition-all cursor-pointer ${
+                  combinedSalesTagFilter === '2307'
+                    ? 'bg-amber-100/70 border-amber-400 ring-2 ring-amber-500/20'
+                    : 'bg-amber-50/50 hover:bg-amber-100/50 border-amber-200'
+                }`}
+                title="Click to filter by Sales with Form 2307"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-amber-800 font-semibold text-[11px] flex items-center gap-1">
+                    <FileText className="w-3 h-3 text-amber-700" />
+                    2307 Certs
+                  </span>
+                  <span className="px-1.5 py-0.2 bg-amber-600 text-white font-mono text-[10px] font-bold rounded-full">
+                    {has2307SalesSummary.count}
+                  </span>
+                </div>
+                <div className="font-mono font-bold text-amber-950 text-sm mt-0.5 truncate" title={formatPHP(has2307SalesSummary.taxable)}>
+                  {formatPHP(has2307SalesSummary.taxable)}
+                </div>
+                <div className="text-[10px] text-amber-700 truncate" title={`Output VAT: ${formatPHP(has2307SalesSummary.outputTax)}`}>
+                  Output VAT: {formatPHP(has2307SalesSummary.outputTax)}
+                </div>
+              </div>
               <div className="bg-white p-2.5 rounded-lg border border-slate-200">
-                <span className="text-slate-500 block text-[11px]">Zero-Rated Sales:</span>
-                <span className="font-mono font-bold text-slate-700 text-sm">
-                  {formatPHP(combinedSalesTotals.zeroRatedAmount)}
+                <span className="text-slate-500 block text-[11px]">Exempt & 0-Rated:</span>
+                <span className="font-mono font-bold text-slate-700 text-sm truncate block">
+                  {formatPHP(combinedSalesTotals.exemptAmount + combinedSalesTotals.zeroRatedAmount)}
+                </span>
+                <span className="text-[10px] text-slate-400 block truncate">
+                  Ex: {formatPHP(combinedSalesTotals.exemptAmount)} • 0R: {formatPHP(combinedSalesTotals.zeroRatedAmount)}
                 </span>
               </div>
             </div>
 
             {/* Filter Controls Toolbar */}
             <div className="p-3 bg-white border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs">
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2 flex-1">
+                {/* Customer Filter Dropdown */}
+                <div className="flex items-center gap-1.5 min-w-[210px] max-w-[320px]">
+                  <span className="text-slate-500 font-medium shrink-0 flex items-center gap-1">
+                    <Filter className="w-3.5 h-3.5 text-violet-600" />
+                    Customer:
+                  </span>
+                  <div className="relative flex-1">
+                    <select
+                      id="combined-sales-customer-filter"
+                      value={combinedSalesCustomerFilter}
+                      onChange={(e) => setCombinedSalesCustomerFilter(e.target.value)}
+                      className="w-full px-2.5 py-1 bg-slate-50 hover:bg-white border border-slate-300 focus:border-violet-500 rounded-lg text-xs font-medium text-slate-800 cursor-pointer truncate transition-colors"
+                    >
+                      <option value="all">All Customers ({uniqueCustomerList.length})</option>
+                      {uniqueCustomerList.map((c) => (
+                        <option key={c.name} value={c.name}>
+                          {c.name} ({c.count} txns{c.govtCount > 0 ? ` • ${c.govtCount} Gov` : ''}{c.cert2307Count > 0 ? ` • ${c.cert2307Count} 2307` : ''})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {combinedSalesCustomerFilter !== 'all' && (
+                    <button
+                      type="button"
+                      onClick={() => setCombinedSalesCustomerFilter('all')}
+                      title="Clear customer filter"
+                      className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
                 {/* Month Filter Tabs */}
                 <div className="flex items-center rounded-lg bg-slate-100 p-1 border border-slate-200">
                   <button
                     type="button"
                     onClick={() => setCombinedSalesFilterMonth('all')}
-                    className={`px-2.5 py-1 rounded-md font-medium text-xs transition-colors cursor-pointer ${
+                    className={`px-2 py-1 rounded-md font-medium text-xs transition-colors cursor-pointer ${
                       combinedSalesFilterMonth === 'all'
                         ? 'bg-white text-slate-900 font-bold shadow-2xs'
                         : 'text-slate-600 hover:text-slate-900'
@@ -2256,13 +2706,13 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
                       key={m.index}
                       type="button"
                       onClick={() => setCombinedSalesFilterMonth(m.index)}
-                      className={`px-2.5 py-1 rounded-md font-medium text-xs transition-colors cursor-pointer ${
+                      className={`px-2 py-1 rounded-md font-medium text-xs transition-colors cursor-pointer ${
                         combinedSalesFilterMonth === m.index
                           ? 'bg-white text-slate-900 font-bold shadow-2xs'
                           : 'text-slate-600 hover:text-slate-900'
                       }`}
                     >
-                      {m.label} ({m.name})
+                      {m.label}
                     </button>
                   ))}
                 </div>
@@ -2282,14 +2732,75 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
                     ))}
                   </select>
                 )}
+
+                {/* Tag Filter Chips */}
+                <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-1 border border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => setCombinedSalesTagFilter('all')}
+                    className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+                      combinedSalesTagFilter === 'all'
+                        ? 'bg-white text-slate-900 font-bold shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    All Tags
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCombinedSalesTagFilter('govt')}
+                    className={`px-2 py-0.5 rounded text-[11px] font-medium flex items-center gap-1 transition-colors cursor-pointer ${
+                      combinedSalesTagFilter === 'govt'
+                        ? 'bg-emerald-600 text-white font-bold shadow-2xs'
+                        : 'text-emerald-800 hover:bg-emerald-100/60'
+                    }`}
+                  >
+                    <Landmark className="w-2.5 h-2.5" />
+                    Gov't ({governmentSalesSummary.count})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCombinedSalesTagFilter('2307')}
+                    className={`px-2 py-0.5 rounded text-[11px] font-medium flex items-center gap-1 transition-colors cursor-pointer ${
+                      combinedSalesTagFilter === '2307'
+                        ? 'bg-amber-600 text-white font-bold shadow-2xs'
+                        : 'text-amber-800 hover:bg-amber-100/60'
+                    }`}
+                  >
+                    <FileText className="w-2.5 h-2.5" />
+                    2307 ({has2307SalesSummary.count})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCombinedSalesTagFilter('both')}
+                    className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+                      combinedSalesTagFilter === 'both'
+                        ? 'bg-violet-600 text-white font-bold shadow-2xs'
+                        : 'text-violet-800 hover:bg-violet-100/60'
+                    }`}
+                  >
+                    Both
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCombinedSalesTagFilter('none')}
+                    className={`px-1.5 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+                      combinedSalesTagFilter === 'none'
+                        ? 'bg-slate-700 text-white font-bold shadow-2xs'
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    Untagged
+                  </button>
+                </div>
               </div>
 
               {/* Search input */}
-              <div className="relative min-w-[220px]">
+              <div className="relative min-w-[200px]">
                 <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
                   type="text"
-                  placeholder="Search customer, TIN, address..."
+                  placeholder="Search name, TIN, address..."
                   value={combinedSalesSearchQuery}
                   onChange={(e) => setCombinedSalesSearchQuery(e.target.value)}
                   className="w-full pl-8 pr-7 py-1 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-violet-500 focus:bg-white"
@@ -2306,95 +2817,346 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
               </div>
             </div>
 
+            {/* Checklist Action Bar (Check all / uncheck based on filter) */}
+            <div className="px-4 py-2 bg-gradient-to-r from-violet-50/70 via-slate-50 to-emerald-50/40 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2.5 text-xs">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-semibold text-slate-700 flex items-center gap-1.5 shrink-0">
+                  <CheckSquare className="w-4 h-4 text-violet-600" />
+                  <span>Checklist Controls on Filtered ({filteredCombinedSales.length}):</span>
+                </span>
+
+                {/* Check / Uncheck All Government */}
+                <div className="inline-flex rounded-lg shadow-2xs border border-emerald-300 overflow-hidden shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => handleToggleAllFilteredGovernment(true)}
+                    disabled={filteredCombinedSales.length === 0}
+                    className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 transition-colors cursor-pointer"
+                    title="Check all filtered sales as Government"
+                  >
+                    <Landmark className="w-3 h-3" />
+                    <span>Check All as Gov't</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleAllFilteredGovernment(false)}
+                    disabled={filteredCombinedSales.length === 0}
+                    className="px-2 py-1 text-xs font-medium bg-emerald-50 hover:bg-emerald-100 text-emerald-800 disabled:opacity-50 border-l border-emerald-300 transition-colors cursor-pointer"
+                    title="Uncheck Government for filtered sales"
+                  >
+                    Uncheck
+                  </button>
+                </div>
+
+                {/* Check / Uncheck All 2307 Certificates */}
+                <div className="inline-flex rounded-lg shadow-2xs border border-amber-300 overflow-hidden shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => handleToggleAllFiltered2307(true)}
+                    disabled={filteredCombinedSales.length === 0}
+                    className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold bg-amber-600 hover:bg-amber-700 text-white disabled:opacity-50 transition-colors cursor-pointer"
+                    title="Check all filtered sales as having 2307 Certificate"
+                  >
+                    <FileText className="w-3 h-3" />
+                    <span>Check All as 2307</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleAllFiltered2307(false)}
+                    disabled={filteredCombinedSales.length === 0}
+                    className="px-2 py-1 text-xs font-medium bg-amber-50 hover:bg-amber-100 text-amber-900 disabled:opacity-50 border-l border-amber-300 transition-colors cursor-pointer"
+                    title="Uncheck 2307 for filtered sales"
+                  >
+                    Uncheck
+                  </button>
+                </div>
+
+                {/* Check Both */}
+                <button
+                  type="button"
+                  onClick={handleCheckAllFilteredBoth}
+                  disabled={filteredCombinedSales.length === 0}
+                  className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold bg-violet-600 hover:bg-violet-700 text-white disabled:opacity-50 rounded-lg shadow-2xs transition-colors cursor-pointer shrink-0"
+                  title="Mark all filtered records as both Government and 2307"
+                >
+                  <CheckCheck className="w-3.5 h-3.5" />
+                  <span>Check Both</span>
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {/* Auto Detect Government Agencies */}
+                <button
+                  type="button"
+                  onClick={handleAutoDetectGovernment}
+                  className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-lg shadow-2xs transition-colors cursor-pointer"
+                  title="Auto-scan customer names for government entities (DepEd, DPWH, LGU, City of, etc.)"
+                >
+                  <Sparkles className="w-3 h-3 text-emerald-600" />
+                  <span>Auto-Detect Gov't</span>
+                </button>
+
+                {/* Reset all tags */}
+                {(governmentSalesKeys.length > 0 || has2307SalesKeys.length > 0) && (
+                  <button
+                    type="button"
+                    onClick={handleClearAllChecklistTags}
+                    className="flex items-center gap-1 px-2 py-1 text-xs font-medium bg-white hover:bg-rose-50 text-slate-500 hover:text-rose-700 border border-slate-300 hover:border-rose-300 rounded-lg transition-colors cursor-pointer"
+                    title="Reset all Government & 2307 checklist marks"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    <span>Clear Tags</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Checklist Feedback Banner */}
+            {checklistFeedbackMsg && (
+              <div
+                className={`px-4 py-1.5 text-xs flex items-center justify-between border-b transition-colors ${
+                  checklistFeedbackMsg.type === 'success'
+                    ? 'bg-emerald-50 text-emerald-900 border-emerald-200'
+                    : 'bg-blue-50 text-blue-900 border-blue-200'
+                }`}
+              >
+                <div className="flex items-center gap-1.5 font-medium">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span>{checklistFeedbackMsg.text}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setChecklistFeedbackMsg(null)}
+                  className="p-0.5 text-slate-400 hover:text-slate-700 rounded cursor-pointer"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            )}
+
             {/* Scrollable Transactions Table */}
             <div className="overflow-auto flex-1 min-h-[300px]">
               {filteredCombinedSales.length > 0 ? (
                 <table className="w-full text-left text-xs border-collapse">
                   <thead className="sticky top-0 bg-slate-100 z-10 text-slate-700 font-semibold border-b border-slate-200">
                     <tr>
-                      <th className="py-2.5 px-2.5 text-center w-10">#</th>
-                      <th className="py-2.5 px-3">Month</th>
+                      <th className="py-2.5 px-2 text-center w-8 text-slate-500">#</th>
+
+                      {/* Government Checklist Header with Master Toggle */}
+                      <th className="py-2 px-2 text-center w-24 bg-emerald-50/90 border-x border-emerald-200 text-emerald-900">
+                        <div className="flex items-center justify-center gap-1">
+                          <input
+                            type="checkbox"
+                            checked={isAllFilteredGovtChecked}
+                            ref={(el) => {
+                              if (el) el.indeterminate = isSomeFilteredGovtChecked;
+                            }}
+                            onChange={(e) => handleToggleAllFilteredGovernment(e.target.checked)}
+                            title="Check / uncheck all filtered rows as Government Sales"
+                            className="w-3.5 h-3.5 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer"
+                          />
+                          <span className="flex items-center gap-0.5 text-[11px] font-bold">
+                            <Landmark className="w-3 h-3 text-emerald-600" />
+                            Gov't
+                          </span>
+                        </div>
+                      </th>
+
+                      {/* Form 2307 Checklist Header with Master Toggle */}
+                      <th className="py-2 px-2 text-center w-24 bg-amber-50/90 border-r border-amber-200 text-amber-900">
+                        <div className="flex items-center justify-center gap-1">
+                          <input
+                            type="checkbox"
+                            checked={isAllFiltered2307Checked}
+                            ref={(el) => {
+                              if (el) el.indeterminate = isSomeFiltered2307Checked;
+                            }}
+                            onChange={(e) => handleToggleAllFiltered2307(e.target.checked)}
+                            title="Check / uncheck all filtered rows as having Form 2307 Certificates"
+                            className="w-3.5 h-3.5 text-amber-600 rounded border-slate-300 focus:ring-amber-500 cursor-pointer"
+                          />
+                          <span className="flex items-center gap-0.5 text-[11px] font-bold">
+                            <FileText className="w-3 h-3 text-amber-600" />
+                            2307
+                          </span>
+                        </div>
+                      </th>
+
+                      <th className="py-2.5 px-2.5">Month</th>
                       {branches.length > 1 && <th className="py-2.5 px-3">Branch</th>}
-                      <th className="py-2.5 px-2.5">Period</th>
-                      <th className="py-2.5 px-3">Customer TIN</th>
+                      <th className="py-2.5 px-2">Period</th>
+                      <th className="py-2.5 px-2.5">Customer TIN</th>
                       <th className="py-2.5 px-3">Registered Name</th>
                       <th className="py-2.5 px-3">Address</th>
-                      <th className="py-2.5 px-2.5 text-right">Gross Sales</th>
-                      <th className="py-2.5 px-2.5 text-right">Exempt</th>
-                      <th className="py-2.5 px-2.5 text-right">Zero-Rated</th>
-                      <th className="py-2.5 px-2.5 text-right">Taxable (12%)</th>
-                      <th className="py-2.5 px-2.5 text-right text-violet-700">Output VAT</th>
+                      <th className="py-2.5 px-2 text-right">Gross Sales</th>
+                      <th className="py-2.5 px-2 text-right">Exempt</th>
+                      <th className="py-2.5 px-2 text-right">Zero-Rated</th>
+                      <th className="py-2.5 px-2 text-right">Taxable (12%)</th>
+                      <th className="py-2.5 px-2 text-right text-violet-700">Output VAT</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 font-mono">
-                    {filteredCombinedSales.map((t, idx) => (
-                      <tr key={idx} className="hover:bg-violet-50/40 transition-colors">
-                        <td className="py-2 px-2.5 text-center text-slate-400 font-sans text-[11px]">
-                          {idx + 1}
-                        </td>
-                        <td className="py-2 px-3 font-sans">
-                          <span
-                            className={`inline-block px-1.5 py-0.5 text-[10px] font-bold rounded ${
-                              t.monthIndex === 1
-                                ? 'bg-blue-100 text-blue-800'
-                                : t.monthIndex === 2
-                                ? 'bg-purple-100 text-purple-800'
-                                : 'bg-pink-100 text-pink-800'
-                            }`}
-                          >
-                            {t.monthLabel}
-                          </span>
-                        </td>
-                        {branches.length > 1 && (
-                          <td className="py-2 px-3 font-sans text-slate-700 max-w-[140px] truncate" title={t.branchName}>
-                            {t.branchName}
+                    {filteredCombinedSales.map((t, idx) => {
+                      const txKey = getSalesTxKey(t);
+                      const isGov = governmentKeySet.has(txKey);
+                      const is2307 = has2307KeySet.has(txKey);
+
+                      return (
+                        <tr
+                          key={idx}
+                          className={`transition-colors ${
+                            isGov && is2307
+                              ? 'bg-violet-50/50 hover:bg-violet-100/50'
+                              : isGov
+                              ? 'bg-emerald-50/40 hover:bg-emerald-100/50'
+                              : is2307
+                              ? 'bg-amber-50/40 hover:bg-amber-100/50'
+                              : 'hover:bg-slate-50/80'
+                          }`}
+                        >
+                          <td className="py-2 px-2 text-center text-slate-400 font-sans text-[11px]">
+                            {idx + 1}
                           </td>
-                        )}
-                        <td className="py-2 px-2.5 text-slate-600">{t.taxableMonth || '—'}</td>
-                        <td className="py-2 px-3 text-slate-800 font-medium">{t.tin || '—'}</td>
-                        <td className="py-2 px-3 font-sans text-slate-900 font-medium truncate max-w-[180px]" title={t.registeredName}>
-                          {t.registeredName}
-                        </td>
-                        <td className="py-2 px-3 font-sans text-slate-600 truncate max-w-[180px]" title={t.address}>
-                          {t.address || '—'}
-                        </td>
-                        <td className="py-2 px-2.5 text-right text-slate-800">
-                          {formatPHP(t.grossAmount)}
-                        </td>
-                        <td className="py-2 px-2.5 text-right text-slate-600">
-                          {t.exemptAmount ? formatPHP(t.exemptAmount) : '—'}
-                        </td>
-                        <td className="py-2 px-2.5 text-right text-slate-600">
-                          {t.zeroRatedAmount ? formatPHP(t.zeroRatedAmount) : '—'}
-                        </td>
-                        <td className="py-2 px-2.5 text-right font-medium text-slate-900">
-                          {formatPHP(t.taxableAmount)}
-                        </td>
-                        <td className="py-2 px-2.5 text-right font-bold text-violet-700">
-                          {formatPHP(t.taxAmount)}
-                        </td>
-                      </tr>
-                    ))}
+
+                          {/* Government Checkbox Cell */}
+                          <td className="py-1.5 px-2 text-center bg-emerald-50/20 border-x border-emerald-100/70">
+                            <label className="inline-flex items-center justify-center gap-1 cursor-pointer select-none">
+                              <input
+                                type="checkbox"
+                                checked={isGov}
+                                onChange={() => toggleGovernmentKey(txKey)}
+                                title="Mark as Government Sale"
+                                className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer"
+                              />
+                              <span
+                                className={`text-[9px] font-bold px-1 py-0.2 rounded transition-colors ${
+                                  isGov ? 'bg-emerald-600 text-white' : 'text-slate-400'
+                                }`}
+                              >
+                                Gov
+                              </span>
+                            </label>
+                          </td>
+
+                          {/* 2307 Checkbox Cell */}
+                          <td className="py-1.5 px-2 text-center bg-amber-50/20 border-r border-amber-100/70">
+                            <label className="inline-flex items-center justify-center gap-1 cursor-pointer select-none">
+                              <input
+                                type="checkbox"
+                                checked={is2307}
+                                onChange={() => toggle2307Key(txKey)}
+                                title="Mark as having 2307 Certificate"
+                                className="w-4 h-4 text-amber-600 rounded border-slate-300 focus:ring-amber-500 cursor-pointer"
+                              />
+                              <span
+                                className={`text-[9px] font-bold px-1 py-0.2 rounded transition-colors ${
+                                  is2307 ? 'bg-amber-600 text-white' : 'text-slate-400'
+                                }`}
+                              >
+                                2307
+                              </span>
+                            </label>
+                          </td>
+
+                          <td className="py-2 px-2.5 font-sans">
+                            <span
+                              className={`inline-block px-1.5 py-0.5 text-[10px] font-bold rounded ${
+                                t.monthIndex === 1
+                                  ? 'bg-blue-100 text-blue-800'
+                                  : t.monthIndex === 2
+                                  ? 'bg-purple-100 text-purple-800'
+                                  : 'bg-pink-100 text-pink-800'
+                              }`}
+                            >
+                              {t.monthLabel}
+                            </span>
+                          </td>
+                          {branches.length > 1 && (
+                            <td className="py-2 px-3 font-sans text-slate-700 max-w-[130px] truncate" title={t.branchName}>
+                              {t.branchName}
+                            </td>
+                          )}
+                          <td className="py-2 px-2 text-slate-600">{t.taxableMonth || '—'}</td>
+                          <td className="py-2 px-2.5 text-slate-800 font-medium">{t.tin || '—'}</td>
+                          <td className="py-2 px-3 font-sans text-slate-900 font-medium max-w-[210px]">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="truncate" title={t.registeredName}>
+                                {t.registeredName}
+                              </span>
+                              {isGov && (
+                                <span className="inline-flex items-center gap-0.5 px-1 py-0.2 text-[8.5px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 rounded shrink-0">
+                                  <Landmark className="w-2.5 h-2.5" />
+                                  Gov't
+                                </span>
+                              )}
+                              {is2307 && (
+                                <span className="inline-flex items-center gap-0.5 px-1 py-0.2 text-[8.5px] font-bold bg-amber-100 text-amber-900 border border-amber-300 rounded shrink-0">
+                                  <FileText className="w-2.5 h-2.5" />
+                                  2307
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-2 px-3 font-sans text-slate-600 truncate max-w-[150px]" title={t.address}>
+                            {t.address || '—'}
+                          </td>
+                          <td className="py-2 px-2 text-right text-slate-800">
+                            {formatPHP(t.grossAmount)}
+                          </td>
+                          <td className="py-2 px-2 text-right text-slate-600">
+                            {t.exemptAmount ? formatPHP(t.exemptAmount) : '—'}
+                          </td>
+                          <td className="py-2 px-2 text-right text-slate-600">
+                            {t.zeroRatedAmount ? formatPHP(t.zeroRatedAmount) : '—'}
+                          </td>
+                          <td className="py-2 px-2 text-right font-medium text-slate-900">
+                            {formatPHP(t.taxableAmount)}
+                          </td>
+                          <td className="py-2 px-2 text-right font-bold text-violet-700">
+                            {formatPHP(t.taxAmount)}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                   {/* Sticky Table Footer Totals */}
                   <tfoot className="sticky bottom-0 bg-slate-100 border-t-2 border-slate-300 font-mono text-xs font-bold text-slate-900 z-10">
                     <tr>
-                      <td colSpan={branches.length > 1 ? 7 : 6} className="py-2.5 px-3 font-sans text-right uppercase tracking-wider text-slate-700">
-                        Combined Totals ({filteredCombinedSales.length} records):
+                      <td
+                        colSpan={branches.length > 1 ? 9 : 8}
+                        className="py-2.5 px-3 font-sans text-right uppercase tracking-wider text-slate-700"
+                      >
+                        <div className="flex items-center justify-end gap-2 flex-wrap">
+                          <span>
+                            Combined Totals ({filteredCombinedSales.length} records):
+                          </span>
+                          {filteredGovtCheckedCount > 0 && (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-md">
+                              <Landmark className="w-3 h-3 text-emerald-700" />
+                              {filteredGovtCheckedCount} Gov't
+                            </span>
+                          )}
+                          {filtered2307CheckedCount > 0 && (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 rounded-md">
+                              <FileText className="w-3 h-3 text-amber-700" />
+                              {filtered2307CheckedCount} 2307
+                            </span>
+                          )}
+                        </div>
                       </td>
-                      <td className="py-2.5 px-2.5 text-right text-slate-900">
+                      <td className="py-2.5 px-2 text-right text-slate-900">
                         {formatPHP(combinedSalesTotals.grossAmount)}
                       </td>
-                      <td className="py-2.5 px-2.5 text-right text-slate-700">
+                      <td className="py-2.5 px-2 text-right text-slate-700">
                         {formatPHP(combinedSalesTotals.exemptAmount)}
                       </td>
-                      <td className="py-2.5 px-2.5 text-right text-slate-700">
+                      <td className="py-2.5 px-2 text-right text-slate-700">
                         {formatPHP(combinedSalesTotals.zeroRatedAmount)}
                       </td>
-                      <td className="py-2.5 px-2.5 text-right text-slate-900">
+                      <td className="py-2.5 px-2 text-right text-slate-900">
                         {formatPHP(combinedSalesTotals.taxableAmount)}
                       </td>
-                      <td className="py-2.5 px-2.5 text-right text-violet-700">
+                      <td className="py-2.5 px-2 text-right text-violet-700">
                         {formatPHP(combinedSalesTotals.taxAmount)}
                       </td>
                     </tr>
@@ -2411,16 +3173,42 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
                   <p className="text-slate-500 max-w-md mx-auto">
                     {allQuarterSalesTransactions.length === 0
                       ? `No sales files have been uploaded yet for 1st, 2nd, or 3rd month of ${quarter}. Upload your Excel files under SALES IN THE QUARTER to view combined transaction details here.`
-                      : `No transactions matched your current search or filter criteria. Try resetting the month filter or clearing the search query.`}
+                      : `No transactions matched your current search or filter criteria. Try resetting the customer or month filter, or clearing the search query.`}
                   </p>
+                  {(combinedSalesCustomerFilter !== 'all' ||
+                    combinedSalesTagFilter !== 'all' ||
+                    combinedSalesFilterMonth !== 'all' ||
+                    combinedSalesSearchQuery) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCombinedSalesCustomerFilter('all');
+                        setCombinedSalesTagFilter('all');
+                        setCombinedSalesFilterMonth('all');
+                        setCombinedSalesSearchQuery('');
+                      }}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold bg-violet-50 hover:bg-violet-100 text-violet-700 border border-violet-200 rounded-lg transition-colors cursor-pointer mt-2"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      Reset All Filters
+                    </button>
+                  )}
                 </div>
               )}
             </div>
 
             {/* Modal Footer */}
-            <div className="p-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
-              <div className="text-xs text-slate-500">
-                Displaying combined 1st, 2nd, and 3rd month sales data for {quarter} {year}
+            <div className="p-3 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3">
+              <div className="text-xs text-slate-600 flex items-center gap-2 flex-wrap">
+                <span className="text-slate-400">Compliance Summary:</span>
+                <span className="inline-flex items-center gap-1 font-semibold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                  <Landmark className="w-3 h-3 text-emerald-600" />
+                  {governmentSalesSummary.count} Government Sales ({formatPHP(governmentSalesSummary.taxable)} Taxable)
+                </span>
+                <span className="inline-flex items-center gap-1 font-semibold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                  <FileText className="w-3 h-3 text-amber-600" />
+                  {has2307SalesSummary.count} with Form 2307 ({formatPHP(has2307SalesSummary.taxable)} Taxable)
+                </span>
               </div>
               <button
                 type="button"

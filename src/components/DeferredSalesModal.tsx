@@ -51,6 +51,12 @@ export const DeferredSalesModal: React.FC<DeferredSalesModalProps> = ({
   const [manualVatDue, setManualVatDue] = useState<string>(
     deferralState.manualVatDue ? deferralState.manualVatDue.toString() : ''
   );
+  const [prevQuarterHideAmount, setPrevQuarterHideAmount] = useState<string>(
+    deferralState.previousQuarterHideAmount ? deferralState.previousQuarterHideAmount.toString() : ''
+  );
+  const [prevQuarterHideOutputTax, setPrevQuarterHideOutputTax] = useState<string>(
+    deferralState.previousQuarterHideOutputTax ? deferralState.previousQuarterHideOutputTax.toString() : ''
+  );
 
   // Filters for Specific Companies tab
   const [searchQuery, setSearchQuery] = useState('');
@@ -92,6 +98,26 @@ export const DeferredSalesModal: React.FC<DeferredSalesModalProps> = ({
       setManualVatDue(computedVat.toFixed(2));
     } else {
       setManualVatDue('');
+    }
+  };
+
+  const handlePrevQuarterHideTaxableChange = (valStr: string) => {
+    setPrevQuarterHideAmount(valStr);
+    const num = parseFloat(valStr);
+    if (!isNaN(num) && num >= 0) {
+      setPrevQuarterHideOutputTax((num * 0.12).toFixed(2));
+    } else {
+      setPrevQuarterHideOutputTax('');
+    }
+  };
+
+  const handlePrevQuarterHideOutputTaxChange = (valStr: string) => {
+    setPrevQuarterHideOutputTax(valStr);
+    const num = parseFloat(valStr);
+    if (!isNaN(num) && num >= 0) {
+      setPrevQuarterHideAmount((num / 0.12).toFixed(2));
+    } else {
+      setPrevQuarterHideAmount('');
     }
   };
 
@@ -157,11 +183,16 @@ export const DeferredSalesModal: React.FC<DeferredSalesModalProps> = ({
   const newBasisTaxable = Math.max(0, totalActualTaxableSales - grandTotalDeferredTaxable);
   const newBasisOutputTax = Math.max(0, totalActualOutputTax - grandTotalDeferredOutputTax);
 
+  const numPrevQuarterHideAmount = parseFloat(prevQuarterHideAmount) || 0;
+  const numPrevQuarterHideOutputTax = parseFloat(prevQuarterHideOutputTax) || 0;
+
   const handleSave = () => {
     onSave({
       deferredCustomerKeys: selectedKeys,
       manualTaxableSales: numManualTaxable,
       manualVatDue: numManualVatDue,
+      previousQuarterHideAmount: numPrevQuarterHideAmount,
+      previousQuarterHideOutputTax: numPrevQuarterHideOutputTax,
     });
     onClose();
   };
@@ -170,6 +201,8 @@ export const DeferredSalesModal: React.FC<DeferredSalesModalProps> = ({
     setSelectedKeys([]);
     setManualTaxable('');
     setManualVatDue('');
+    setPrevQuarterHideAmount('');
+    setPrevQuarterHideOutputTax('');
   };
 
   if (!isOpen) return null;
@@ -492,6 +525,68 @@ export const DeferredSalesModal: React.FC<DeferredSalesModalProps> = ({
                   </button>
                 )}
               </div>
+
+              {/* Section: Previous Quarter Hide Amount */}
+              <div className="mt-4 pt-4 border-t border-slate-200 space-y-3">
+                <div className="bg-slate-50/80 p-3 rounded-xl border border-slate-200">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-indigo-600"></span>
+                      Previous Quarter Hide Amount (Deferred from Prior Quarter)
+                    </span>
+                    {numPrevQuarterHideAmount > 0 && (
+                      <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full">
+                        Tracked for Reconciliation
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-500 mb-3">
+                    Enter the previous quarter's hide amount (uncollected / deferred sales or output tax) to be included in the Summary of Deferrals & Variance Reconciliation report.
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="block text-[11px] font-bold text-slate-700 uppercase">
+                        Previous Quarter Hide Taxable Sales (₱)
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-mono font-bold text-xs">
+                          ₱
+                        </span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                          value={prevQuarterHideAmount}
+                          onChange={(e) => handlePrevQuarterHideTaxableChange(e.target.value)}
+                          className="w-full pl-8 pr-3 py-1.5 text-xs font-mono font-bold bg-white border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="block text-[11px] font-bold text-slate-700 uppercase">
+                        Previous Quarter Hide VAT Due (₱)
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-mono font-bold text-xs">
+                          ₱
+                        </span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                          value={prevQuarterHideOutputTax}
+                          onChange={(e) => handlePrevQuarterHideOutputTaxChange(e.target.value)}
+                          className="w-full pl-8 pr-3 py-1.5 text-xs font-mono font-bold bg-white border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
@@ -504,6 +599,7 @@ export const DeferredSalesModal: React.FC<DeferredSalesModalProps> = ({
               </div>
               <div className="text-[11px] text-slate-400 font-mono">
                 {selectedKeys.length} Company(ies) Deferred • Manual: {formatPHP(numManualTaxable)}
+                {numPrevQuarterHideAmount > 0 && ` • Prev Qtr Hide: ${formatPHP(numPrevQuarterHideAmount)}`}
               </div>
             </div>
 

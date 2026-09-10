@@ -74,6 +74,16 @@ export const TaxDeadlineCalendar: React.FC<TaxDeadlineCalendarProps> = ({
   const currentRealMonth = today.getMonth() + 1;
   const currentRealDay = today.getDate();
 
+  const availableYears = useMemo(() => {
+    const start = Math.min(2023, currentRealYear - 2);
+    const end = Math.max(currentRealYear + 2, 2027);
+    const list: number[] = [];
+    for (let y = start; y <= end; y++) {
+      list.push(y);
+    }
+    return list;
+  }, [currentRealYear]);
+
   // Get all deadlines for the selected month and year
   const allMonthDeadlines = useMemo(() => {
     return getBirDeadlinesForMonth(selectedYear, selectedMonth);
@@ -367,10 +377,11 @@ export const TaxDeadlineCalendar: React.FC<TaxDeadlineCalendarProps> = ({
                 setSelectedDayNumber(null);
               }}
               className="px-2.5 py-1.5 text-xs font-semibold bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+              title="Select Calendar Year"
             >
-              {[2024, 2025, 2026, 2027].map((yr) => (
+              {availableYears.map((yr) => (
                 <option key={yr} value={yr}>
-                  {yr}
+                  {yr} {yr === currentRealYear ? '• Today' : ''}
                 </option>
               ))}
             </select>

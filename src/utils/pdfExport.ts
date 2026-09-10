@@ -1,7 +1,7 @@
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { ClientProfile, Quarter, Data2550Q } from '../types/tax';
-import { ClientBranchSchedule, PurchasesReportingMode, BirUploadedFileRecord } from '../types/branchVat';
+import { ClientBranchSchedule, PurchasesReportingMode, BirUploadedFileRecord, BirTransactionRow } from '../types/branchVat';
 import { calculate2550Q, Result2550Q, computeMonthlyQuarterBreakdown } from './taxCalculations';
 
 interface PdfExportOptions {
@@ -154,6 +154,13 @@ export async function exportMultiBranchAnd2550QPdf({
       }
     });
 
+    if (purchasesMode === 'consolidated' && consolidatedPurchasesFile?.totals) {
+      purchasesColF = consolidatedPurchasesFile.totals.exemptAmount || 0;
+      purchasesColG = consolidatedPurchasesFile.totals.zeroRatedAmount || 0;
+      purchasesColH = consolidatedPurchasesFile.totals.taxableAmount || 0;
+      purchasesColL = consolidatedPurchasesFile.totals.taxAmount || 0;
+    }
+
     // If branches didn't have totals but 2550Q data is present, align them
     if (salesColH === 0 && effective2550QData) {
       salesColF = effective2550QData.vatExemptSales || 0;
@@ -288,10 +295,10 @@ export async function exportMultiBranchAnd2550QPdf({
               Republic of the Philippines • Department of Finance • Bureau of Internal Revenue
             </div>
             <div style="font-size: 18px; font-weight: 800; color: #0f172a; margin-top: 2px; letter-spacing: -0.01em;">
-              QUARTERLY VAT MULTI-BRANCH AGGREGATION SCHEDULE
+              ${client.registeredName || client.tradeName || 'Taxpayer'}
             </div>
             <div style="font-size: 11px; color: #64748b; margin-top: 1px;">
-              Consolidated Summary of Branch Sales and Purchases pursuant to RR No. 16-2005 as amended & RA 11976 (eOPT Act)
+              Quarterly VAT Multi-Branch Aggregation Schedule • Pursuant to RR No. 16-2005 as amended & RA 11976 (eOPT Act)
             </div>
           </div>
           <div style="text-align: right; background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 14px;">
@@ -301,34 +308,24 @@ export async function exportMultiBranchAnd2550QPdf({
           </div>
         </div>
 
-        <!-- Taxpayer Profile Grid -->
-        <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; display: grid; grid-template-columns: 2.2fr 1.4fr 1.2fr 1.2fr; gap: 12px; font-size: 11px;">
-          <div>
-            <div style="font-size: 9px; font-weight: 700; text-transform: uppercase; color: #64748b; letter-spacing: 0.04em;">Company / Taxpayer Registered Name</div>
-            <div style="font-weight: 800; color: #0f172a; font-size: 13px; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-              ${client.registeredName || client.tradeName}
-            </div>
-            <div style="font-size: 11px; color: #334155; margin-top: 1px;">
-              Trade Name: <strong>${client.tradeName || client.registeredName}</strong>
-            </div>
-            <div style="font-size: 10px; color: #64748b; margin-top: 1px;">Classification: ${client.classification} • VAT Status: ${client.vatStatus === 'vat-registered' ? 'VAT Registered' : 'Non-VAT'}</div>
-          </div>
+        <!-- Taxpayer Profile Grid (Only TIN, Purchases Mode, and Form Type) -->
+        <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; display: grid; grid-template-columns: 1.4fr 1.3fr 1.3fr; gap: 16px; font-size: 11px;">
           <div>
             <div style="font-size: 9px; font-weight: 700; text-transform: uppercase; color: #64748b; letter-spacing: 0.04em;">Taxpayer Identification No. (TIN)</div>
-            <div style="font-weight: 700; font-family: monospace; color: #0f172a; font-size: 12px; margin-top: 1px;">${client.tin}</div>
-            <div style="font-size: 10px; color: #475569; margin-top: 1px;">${client.rdo}</div>
+            <div style="font-weight: 700; font-family: monospace; color: #0f172a; font-size: 12.5px; margin-top: 1px;">${client.tin}</div>
+            <div style="font-size: 10px; color: #475569; margin-top: 1px;">RDO: ${client.rdo} • Classification: ${client.classification}</div>
           </div>
           <div>
             <div style="font-size: 9px; font-weight: 700; text-transform: uppercase; color: #64748b; letter-spacing: 0.04em;">Purchases Mode</div>
-            <div style="font-weight: 700; color: #0f172a; font-size: 11px; margin-top: 1px;">
+            <div style="font-weight: 700; color: #0f172a; font-size: 11.5px; margin-top: 1px;">
               ${purchasesMode === 'per-branch' ? 'Per-Branch Input Tax' : 'Consolidated Purchases'}
             </div>
             <div style="font-size: 10px; color: #64748b; margin-top: 1px;">Branches: ${branches.length} Active</div>
           </div>
           <div>
             <div style="font-size: 9px; font-weight: 700; text-transform: uppercase; color: #64748b; letter-spacing: 0.04em;">Form Type</div>
-            <div style="font-weight: 700; color: #4338ca; font-size: 11px; margin-top: 1px;">BIR Form 2550Q (VAT)</div>
-            <div style="font-size: 10px; color: #059669; margin-top: 1px;">Status: Validated</div>
+            <div style="font-weight: 700; color: #4338ca; font-size: 11.5px; margin-top: 1px;">BIR Form 2550Q (VAT)</div>
+            <div style="font-size: 10px; color: #059669; margin-top: 1px;">Status: Validated (${client.vatStatus === 'vat-registered' ? 'VAT Registered' : 'Non-VAT'})</div>
           </div>
         </div>
 
@@ -540,7 +537,7 @@ export async function exportMultiBranchAnd2550QPdf({
               Consolidated Sales & Purchases Summary (${quarter}) • Combined Basis
             </div>
             <div style="font-size: 9px; color: #475569; font-style: italic;">
-              Combined Sales from all Branches across Months less Combined Purchases / Consolidated = VAT Due
+              Combined Sales from all Branches less ${purchasesMode === 'per-branch' ? 'Combined Per-Branch Purchases' : 'Consolidated Purchases'} = VAT Due
             </div>
           </div>
           <table style="width: 100%; border-collapse: collapse; font-size: 9.5px;">
@@ -551,7 +548,7 @@ export async function exportMultiBranchAnd2550QPdf({
                   COMBINED SALES (ALL BRANCHES & MONTHS)
                 </th>
                 <th colspan="4" style="padding: 4px 6px; text-align: center; border-right: 1px solid #334155; background-color: #451a03; color: #fef08a;">
-                  LESS: COMBINED PURCHASES / CONSOLIDATED
+                  LESS: ${purchasesMode === 'per-branch' ? 'COMBINED PURCHASES (PER-BRANCH)' : 'CONSOLIDATED PURCHASES'}
                 </th>
                 <th rowspan="2" style="padding: 6px 8px; text-align: right; background-color: #0369a1; color: #ffffff; width: 12%;">
                   VAT DUE
@@ -571,34 +568,34 @@ export async function exportMultiBranchAnd2550QPdf({
             <tbody>
               <tr style="background-color: #ffffff; border-bottom: 2px solid #0f172a; font-weight: 700;">
                 <td style="padding: 8px 8px; font-weight: 800; color: #0f172a; border-right: 1px solid #cbd5e1;">
-                  Combined All Branches (${quarter})
+                  Combined All Branches (${quarter}) • ${purchasesMode === 'per-branch' ? 'Combined Purchases' : 'Consolidated Purchases'}
                 </td>
                 <td style="padding: 8px 5px; text-align: right; font-family: monospace; font-weight: 800; color: #0f172a; border-right: 1px solid #e2e8f0;">
-                  ${formatPdfCurrency(quarterTotals.taxableSales)}
+                  ${formatPdfCurrency(aggregatedTotals.salesColH)}
                 </td>
                 <td style="padding: 8px 5px; text-align: right; font-family: monospace; color: #64748b; border-right: 1px solid #e2e8f0;">
-                  ${formatPdfCurrency(quarterTotals.zeroRatedSales)}
+                  ${formatPdfCurrency(aggregatedTotals.salesColG)}
                 </td>
                 <td style="padding: 8px 5px; text-align: right; font-family: monospace; color: #64748b; border-right: 1px solid #cbd5e1;">
-                  ${formatPdfCurrency(quarterTotals.exemptSales)}
+                  ${formatPdfCurrency(aggregatedTotals.salesColF)}
                 </td>
                 <td style="padding: 8px 5px; text-align: right; font-family: monospace; font-weight: 900; color: #4338ca; background-color: #f5f3ff; border-right: 1px solid #94a3b8;">
-                  ${formatPdfCurrency(quarterTotals.outputTax)}
+                  ${formatPdfCurrency(aggregatedTotals.salesColL)}
                 </td>
                 <td style="padding: 8px 5px; text-align: right; font-family: monospace; font-weight: 800; color: #0f172a; border-right: 1px solid #e2e8f0;">
-                  ${formatPdfCurrency(quarterTotals.taxablePurchases)}
+                  ${formatPdfCurrency(aggregatedTotals.purchasesColH)}
                 </td>
                 <td style="padding: 8px 5px; text-align: right; font-family: monospace; color: #64748b; border-right: 1px solid #e2e8f0;">
-                  ${formatPdfCurrency(quarterTotals.zeroRatedPurchases)}
+                  ${formatPdfCurrency(aggregatedTotals.purchasesColG)}
                 </td>
                 <td style="padding: 8px 5px; text-align: right; font-family: monospace; color: #64748b; border-right: 1px solid #cbd5e1;">
-                  ${formatPdfCurrency(quarterTotals.exemptPurchases)}
+                  ${formatPdfCurrency(aggregatedTotals.purchasesColF)}
                 </td>
                 <td style="padding: 8px 5px; text-align: right; font-family: monospace; font-weight: 900; color: #b45309; background-color: #fffbeb; border-right: 1px solid #94a3b8;">
-                  ${formatPdfCurrency(quarterTotals.inputTax)}
+                  ${formatPdfCurrency(aggregatedTotals.purchasesColL)}
                 </td>
-                <td style="padding: 8px 8px; text-align: right; font-family: monospace; font-weight: 900; font-size: 11px; color: ${quarterTotals.netVat >= 0 ? '#047857' : '#0369a1'}; background-color: ${quarterTotals.netVat >= 0 ? '#ecfdf5' : '#f0f9ff'};">
-                  ${formatPdfCurrency(quarterTotals.netVat)}
+                <td style="padding: 8px 8px; text-align: right; font-family: monospace; font-weight: 900; font-size: 11px; color: ${aggregatedTotals.salesColL - aggregatedTotals.purchasesColL >= 0 ? '#047857' : '#0369a1'}; background-color: ${aggregatedTotals.salesColL - aggregatedTotals.purchasesColL >= 0 ? '#ecfdf5' : '#f0f9ff'};">
+                  ${formatPdfCurrency(aggregatedTotals.salesColL - aggregatedTotals.purchasesColL)}
                 </td>
               </tr>
             </tbody>
@@ -627,19 +624,10 @@ export async function exportMultiBranchAnd2550QPdf({
               Bureau of Internal Revenue • Quarterly Value-Added Tax Return
             </div>
             <div style="font-size: 18px; font-weight: 800; color: #0f172a; margin-top: 2px; letter-spacing: -0.01em;">
-              BIR FORM 2550Q: SCHEDULES 1 TO 3 & VAT SUMMARY
+              ${client.registeredName || client.tradeName || 'Taxpayer'}
             </div>
             <div style="font-size: 11px; color: #64748b; margin-top: 1px;">
-              Comprehensive Return Computation Schedules & Multi-Branch Rollup Integration
-            </div>
-          </div>
-          <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 14px; min-width: 280px;">
-            <div style="font-size: 9px; font-weight: 700; text-transform: uppercase; color: #64748b; letter-spacing: 0.04em;">Company / Taxpayer Name</div>
-            <div style="font-size: 13px; font-weight: 800; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-              ${client.registeredName || client.tradeName}
-            </div>
-            <div style="font-size: 10px; color: #475569; margin-top: 1px;">
-              TIN: <strong style="font-family: monospace;">${client.tin}</strong> • RDO: ${client.rdo}
+              BIR Form 2550Q: Schedules 1 to 3 & VAT Summary • TIN: ${client.tin} • RDO: ${client.rdo}
             </div>
           </div>
           <div style="text-align: right; background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 14px;">
@@ -935,6 +923,574 @@ export async function exportMultiBranchAnd2550QPdf({
     pdf.save(fileName);
   } finally {
     // Always clean up the temporary off-screen container
+    if (document.body.contains(container)) {
+      document.body.removeChild(container);
+    }
+  }
+}
+
+export interface VatComparisonPdfOptions {
+  client: ClientProfile;
+  quarter: Quarter;
+  year: number;
+  branches: ClientBranchSchedule[];
+  purchasesMode: PurchasesReportingMode;
+  consolidatedPurchasesFile?: BirUploadedFileRecord | null;
+  branchCalculations: Array<{
+    branch: ClientBranchSchedule;
+    actualSalesF: number;
+    actualSalesG: number;
+    actualSalesH: number;
+    actualSalesL: number;
+    bPurchF: number;
+    bPurchG: number;
+    bPurchH: number;
+    bPurchL: number;
+    actualNetVat: number;
+    adjustedSalesF: number;
+    adjustedSalesG: number;
+    adjustedSalesH: number;
+    adjustedSalesL: number;
+    adjustedNetVat: number;
+    totalBranchDefTaxable: number;
+    totalBranchDefOutputTax: number;
+    proRatedManualTaxable: number;
+    proRatedManualOutputTax: number;
+  }>;
+  actualTotals: {
+    salesColF: number;
+    salesColG: number;
+    salesColH: number;
+    salesColL: number;
+    purchasesColF: number;
+    purchasesColG: number;
+    purchasesColH: number;
+    purchasesColL: number;
+    netVatPayable: number;
+  };
+  adjustedTotals: {
+    salesColF: number;
+    salesColG: number;
+    salesColH: number;
+    salesColL: number;
+    purchasesColF: number;
+    purchasesColG: number;
+    purchasesColH: number;
+    purchasesColL: number;
+    netVatPayable: number;
+  };
+  deferredCustomersList?: Array<
+    BirTransactionRow & {
+      monthIndex: number;
+      monthLabel: string;
+      monthName: string;
+      branchName: string;
+      branchId: string;
+    }
+  >;
+  manualDefTaxable?: number;
+  manualDefOutputTax?: number;
+  totalDeferredTaxable?: number;
+  totalDeferredOutputTax?: number;
+  previousQuarterHideAmount?: number;
+  previousQuarterHideOutputTax?: number;
+}
+
+export async function exportVatComparisonPdf({
+  client,
+  quarter,
+  year,
+  branches,
+  purchasesMode,
+  branchCalculations,
+  actualTotals,
+  adjustedTotals,
+  deferredCustomersList = [],
+  manualDefTaxable = 0,
+  manualDefOutputTax = 0,
+  totalDeferredTaxable = 0,
+  totalDeferredOutputTax = 0,
+  previousQuarterHideAmount = 0,
+  previousQuarterHideOutputTax = 0,
+}: VatComparisonPdfOptions): Promise<void> {
+  const quarterDueDates: Record<Quarter, string> = {
+    Q1: `April 25, ${year}`,
+    Q2: `July 25, ${year}`,
+    Q3: `October 25, ${year}`,
+    Q4: `January 25, ${year + 1}`,
+  };
+  const statutoryDueDate = quarterDueDates[quarter];
+  const generatedTimestamp = new Date().toLocaleString('en-PH', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
+
+  const hasActiveDeferral =
+    totalDeferredTaxable > 0 ||
+    totalDeferredOutputTax > 0 ||
+    deferredCustomersList.length > 0 ||
+    manualDefTaxable > 0 ||
+    manualDefOutputTax > 0;
+
+  const effectiveTotalDefTaxable = totalDeferredTaxable || 0;
+  const effectiveTotalDefOutputTax = totalDeferredOutputTax || 0;
+  const effectiveManualTaxable = manualDefTaxable || 0;
+  const effectiveManualOutputTax = manualDefOutputTax || 0;
+  const effectivePrevQuarterHideAmount = previousQuarterHideAmount || 0;
+  const effectivePrevQuarterHideOutputTax =
+    previousQuarterHideOutputTax || (effectivePrevQuarterHideAmount > 0 ? effectivePrevQuarterHideAmount * 0.12 : 0);
+
+  const container = document.createElement('div');
+  container.style.position = 'fixed';
+  container.style.left = '-10000px';
+  container.style.top = '0';
+  container.style.width = '1120px';
+  container.style.backgroundColor = '#ffffff';
+  container.style.zIndex = '-9999';
+  container.style.fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif';
+  container.style.color = '#0f172a';
+  container.style.boxSizing = 'border-box';
+
+  // Deferrals detailed rows (up to 4 on page 1, or full list)
+  const isMultiPageDeferrals = deferredCustomersList.length > 4;
+  const page1DeferralItems = isMultiPageDeferrals ? deferredCustomersList.slice(0, 3) : deferredCustomersList;
+
+  const renderDeferredRows = (list: typeof deferredCustomersList) =>
+    list
+      .map(
+        (tx, i) => `
+      <tr style="border-bottom: 1px solid #e2e8f0; font-size: 8px; background-color: ${i % 2 === 0 ? '#ffffff' : '#faf5ff'};">
+        <td style="padding: 3px 6px; font-weight: 600; color: #334155;">${tx.branchName || 'Main'}</td>
+        <td style="padding: 3px 6px; color: #0f172a; font-weight: 600; max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+          ${tx.registeredName || 'Unnamed Customer'}
+        </td>
+        <td style="padding: 3px 6px; font-family: monospace; color: #475569;">${tx.tin || 'N/A'}</td>
+        <td style="padding: 3px 6px; color: #64748b;">${tx.monthLabel || `${tx.monthIndex} Month`}</td>
+        <td style="padding: 3px 6px; text-align: right; font-weight: 600; color: #6b21a8;">${formatPdfCurrency(tx.taxableAmount || 0)}</td>
+        <td style="padding: 3px 6px; text-align: right; font-weight: 700; color: #7c3aed;">${formatPdfCurrency(tx.taxAmount || 0)}</td>
+        <td style="padding: 3px 6px; text-align: center; color: #9333ea; font-size: 7.5px; font-weight: 700;">DEFERRED</td>
+      </tr>
+    `
+      )
+      .join('');
+
+  // Page 1 HTML
+  const page1Html = `
+    <div class="pdf-comparison-page" id="pdf-comp-page-1" style="width: 1120px; min-height: 792px; padding: 20px 28px; background-color: #ffffff; box-sizing: border-box;">
+      <!-- Header -->
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #0f172a; padding-bottom: 8px; margin-bottom: 10px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <div style="width: 38px; height: 38px; border-radius: 8px; background: linear-gradient(135deg, #1e1b4b, #312e81); color: #ffffff; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 15px; border: 1px solid #4338ca;">
+            BIR
+          </div>
+          <div>
+            <div style="font-size: 8px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.08em;">
+              Republic of the Philippines • Bureau of Internal Revenue
+            </div>
+            <div style="font-size: 16px; font-weight: 800; color: #0f172a; letter-spacing: -0.01em; margin-top: 1px;">
+              ${client.registeredName || client.tradeName || 'Taxpayer'}
+            </div>
+            <div style="font-size: 9.5px; color: #64748b; font-weight: 500;">
+              Quarterly VAT Multi-Branch Comparison Schedule • Actual Basis vs. Adjusted Basis (Deferred Sales & VAT Due Reconciliation)
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 12px; text-align: right;">
+            <div style="font-size: 8px; font-weight: 700; color: #64748b; text-transform: uppercase;">Tax Period</div>
+            <div style="font-size: 13px; font-weight: 800; color: #1e1b4b;">${quarter} ${year}</div>
+            <div style="font-size: 8.5px; color: #64748b;">Due: ${statutoryDueDate}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Taxpayer Profile Grid (Only TIN, Purchases Mode, and Form Type) -->
+      <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 12px; margin-bottom: 10px; display: grid; grid-template-columns: 1.4fr 1.3fr 1.3fr; gap: 12px; font-size: 9px;">
+        <div>
+          <div style="font-size: 8px; font-weight: 700; text-transform: uppercase; color: #64748b; letter-spacing: 0.04em;">Taxpayer Identification No. (TIN)</div>
+          <div style="font-weight: 700; font-family: monospace; color: #0f172a; font-size: 11px; margin-top: 1px;">${client.tin}</div>
+          <div style="font-size: 8.5px; color: #475569; margin-top: 1px;">RDO: ${client.rdo} • Classification: ${client.classification}</div>
+        </div>
+        <div>
+          <div style="font-size: 8px; font-weight: 700; text-transform: uppercase; color: #64748b; letter-spacing: 0.04em;">Purchases Mode</div>
+          <div style="font-weight: 700; color: #0f172a; font-size: 10px; margin-top: 1px;">
+            ${purchasesMode === 'per-branch' ? 'Per-Branch Input Tax' : 'Consolidated Purchases'}
+          </div>
+          <div style="font-size: 8.5px; color: #475569; margin-top: 1px;">${branches.length} Active Branch(es)</div>
+        </div>
+        <div>
+          <div style="font-size: 8px; font-weight: 700; text-transform: uppercase; color: #64748b; letter-spacing: 0.04em;">Form Type</div>
+          <div style="font-weight: 700; color: #4338ca; font-size: 10px; margin-top: 1px;">BIR Form 2550Q (Quarterly VAT)</div>
+          <div style="font-size: 8.5px; color: #059669; margin-top: 1px;">Status: Validated (${client.vatStatus === 'vat-registered' ? 'VAT Registered' : 'Non-VAT'})</div>
+        </div>
+      </div>
+
+      <!-- TABLE 1: ACTUAL COMPUTATION -->
+      <div style="margin-bottom: 8px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <div style="width: 7px; height: 7px; border-radius: 2px; background-color: #2563eb;"></div>
+            <div style="font-size: 10px; font-weight: 800; color: #1e293b; text-transform: uppercase; letter-spacing: 0.04em;">
+              1. ACTUAL COMPUTATION
+            </div>
+          </div>
+          <div style="font-size: 8px; color: #64748b; font-style: italic;">
+            Direct unadjusted rollup from uploaded monthly 2550Q / SLSP files
+          </div>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; border: 1px solid #cbd5e1; border-radius: 4px; overflow: hidden; table-layout: fixed;">
+          <thead>
+            <tr style="background-color: #0f172a; color: #ffffff;">
+              <th rowspan="2" style="padding: 6px 8px; text-align: left; border-right: 1px solid #334155; width: 10.5%; font-size: 9.5px; font-weight: 800; text-transform: uppercase; vertical-align: middle; white-space: nowrap;">Consolidation Basis</th>
+              <th colspan="4" style="padding: 5px 6px; text-align: center; border-right: 1px solid #334155; background-color: #1e1b4b; color: #e0e7ff; font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em;">
+                ACTUAL SALES
+              </th>
+              <th colspan="4" style="padding: 5px 6px; text-align: center; border-right: 1px solid #334155; background-color: #451a03; color: #fef08a; font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em;">
+                ACTUAL PURCHASES
+              </th>
+              <th rowspan="2" style="padding: 6px 8px; text-align: right; background-color: #0369a1; color: #ffffff; width: 12.5%; font-size: 9.5px; font-weight: 800; text-transform: uppercase; vertical-align: middle; white-space: nowrap;">
+                ACTUAL VAT DUE
+              </th>
+            </tr>
+            <tr style="background-color: #e2e8f0; color: #1e293b; font-weight: 700; font-size: 9px; border-bottom: 1px solid #cbd5e1;">
+              <th style="width: 9.6%; padding: 4.5px 5px; text-align: right; border-right: 1px solid #cbd5e1; vertical-align: middle; white-space: nowrap;">Taxable (12%)</th>
+              <th style="width: 9.6%; padding: 4.5px 5px; text-align: right; border-right: 1px solid #cbd5e1; vertical-align: middle; white-space: nowrap;">Zero-Rated</th>
+              <th style="width: 9.6%; padding: 4.5px 5px; text-align: right; border-right: 1px solid #cbd5e1; vertical-align: middle; white-space: nowrap;">Exempt</th>
+              <th style="width: 9.6%; padding: 4.5px 5px; text-align: right; border-right: 1px solid #94a3b8; background-color: #ede9fe; color: #4338ca; vertical-align: middle; white-space: nowrap;">Output Tax</th>
+              <th style="width: 9.6%; padding: 4.5px 5px; text-align: right; border-right: 1px solid #cbd5e1; vertical-align: middle; white-space: nowrap;">Taxable (12%)</th>
+              <th style="width: 9.6%; padding: 4.5px 5px; text-align: right; border-right: 1px solid #cbd5e1; vertical-align: middle; white-space: nowrap;">Zero-Rated</th>
+              <th style="width: 9.6%; padding: 4.5px 5px; text-align: right; border-right: 1px solid #cbd5e1; vertical-align: middle; white-space: nowrap;">Exempt</th>
+              <th style="width: 9.6%; padding: 4.5px 5px; text-align: right; border-right: 1px solid #94a3b8; background-color: #fef3c7; color: #b45309; vertical-align: middle; white-space: nowrap;">Input Tax</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="background-color: #ffffff; border-bottom: 2px solid #0f172a; font-weight: 700;">
+              <td style="padding: 7px 8px; font-weight: 800; font-size: 11px; color: #0f172a; border-right: 1px solid #cbd5e1; vertical-align: middle; white-space: nowrap;">
+                Actual
+              </td>
+              <td style="padding: 7px 6px; text-align: right; font-family: monospace; font-size: 10px; font-weight: 700; color: #0f172a; border-right: 1px solid #e2e8f0; vertical-align: middle; white-space: nowrap;">
+                ${formatPdfCurrency(actualTotals.salesColH)}
+              </td>
+              <td style="padding: 7px 6px; text-align: right; font-family: monospace; font-size: 10px; font-weight: 700; color: #64748b; border-right: 1px solid #e2e8f0; vertical-align: middle; white-space: nowrap;">
+                ${formatPdfCurrency(actualTotals.salesColG)}
+              </td>
+              <td style="padding: 7px 6px; text-align: right; font-family: monospace; font-size: 10px; font-weight: 700; color: #64748b; border-right: 1px solid #cbd5e1; vertical-align: middle; white-space: nowrap;">
+                ${formatPdfCurrency(actualTotals.salesColF)}
+              </td>
+              <td style="padding: 7px 6px; text-align: right; font-family: monospace; font-size: 10px; font-weight: 800; color: #4338ca; background-color: #f5f3ff; border-right: 1px solid #94a3b8; vertical-align: middle; white-space: nowrap;">
+                ${formatPdfCurrency(actualTotals.salesColL)}
+              </td>
+              <td style="padding: 7px 6px; text-align: right; font-family: monospace; font-size: 10px; font-weight: 700; color: #0f172a; border-right: 1px solid #e2e8f0; vertical-align: middle; white-space: nowrap;">
+                ${formatPdfCurrency(actualTotals.purchasesColH)}
+              </td>
+              <td style="padding: 7px 6px; text-align: right; font-family: monospace; font-size: 10px; font-weight: 700; color: #64748b; border-right: 1px solid #e2e8f0; vertical-align: middle; white-space: nowrap;">
+                ${formatPdfCurrency(actualTotals.purchasesColG)}
+              </td>
+              <td style="padding: 7px 6px; text-align: right; font-family: monospace; font-size: 10px; font-weight: 700; color: #64748b; border-right: 1px solid #cbd5e1; vertical-align: middle; white-space: nowrap;">
+                ${formatPdfCurrency(actualTotals.purchasesColF)}
+              </td>
+              <td style="padding: 7px 6px; text-align: right; font-family: monospace; font-size: 10px; font-weight: 800; color: #b45309; background-color: #fffbeb; border-right: 1px solid #94a3b8; vertical-align: middle; white-space: nowrap;">
+                ${formatPdfCurrency(actualTotals.purchasesColL)}
+              </td>
+              <td style="padding: 7px 8px; text-align: right; font-family: monospace; font-size: 10px; font-weight: 800; color: ${actualTotals.netVatPayable >= 0 ? '#047857' : '#0369a1'}; background-color: ${actualTotals.netVatPayable >= 0 ? '#ecfdf5' : '#f0f9ff'}; vertical-align: middle; white-space: nowrap;">
+                ${formatPdfCurrency(actualTotals.netVatPayable)}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- TABLE 2: ADJUSTED COMPUTATION -->
+      <div style="margin-bottom: 8px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <div style="width: 7px; height: 7px; border-radius: 2px; background-color: #7c3aed;"></div>
+            <div style="font-size: 10px; font-weight: 800; color: #581c87; text-transform: uppercase; letter-spacing: 0.04em;">
+              2. ADJUSTED COMPUTATION
+            </div>
+          </div>
+          <div style="font-size: 8px; color: #6b21a8; font-weight: 600;">
+            Adjusted for deferred uncollected sales / VAT pursuant to RR 16-2005
+          </div>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; border: 1px solid #d8b4fe; border-radius: 4px; overflow: hidden; table-layout: fixed;">
+          <thead>
+            <tr style="background-color: #3b0764; color: #ffffff;">
+              <th rowspan="2" style="padding: 6px 8px; text-align: left; border-right: 1px solid #581c87; width: 10.5%; font-size: 9.5px; font-weight: 800; text-transform: uppercase; vertical-align: middle; white-space: nowrap;">Consolidation Basis</th>
+              <th colspan="4" style="padding: 5px 6px; text-align: center; border-right: 1px solid #581c87; background-color: #4c1d95; color: #f5d0fe; font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em;">
+                ADJUSTED SALES
+              </th>
+              <th colspan="4" style="padding: 5px 6px; text-align: center; border-right: 1px solid #581c87; background-color: #451a03; color: #fef08a; font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em;">
+                ADJUSTED PURCHASES
+              </th>
+              <th rowspan="2" style="padding: 6px 8px; text-align: right; background-color: #581c87; color: #ffffff; width: 12.5%; font-size: 9.5px; font-weight: 800; text-transform: uppercase; vertical-align: middle; white-space: nowrap;">
+                ADJUSTED VAT DUE
+              </th>
+            </tr>
+            <tr style="background-color: #f3e8ff; color: #581c87; font-weight: 700; font-size: 9px; border-bottom: 1px solid #d8b4fe;">
+              <th style="width: 9.6%; padding: 4.5px 5px; text-align: right; border-right: 1px solid #e9d5ff; vertical-align: middle; white-space: nowrap;">Taxable (12%)</th>
+              <th style="width: 9.6%; padding: 4.5px 5px; text-align: right; border-right: 1px solid #e9d5ff; vertical-align: middle; white-space: nowrap;">Zero-Rated</th>
+              <th style="width: 9.6%; padding: 4.5px 5px; text-align: right; border-right: 1px solid #e9d5ff; vertical-align: middle; white-space: nowrap;">Exempt</th>
+              <th style="width: 9.6%; padding: 4.5px 5px; text-align: right; border-right: 1px solid #c084fc; background-color: #f3e8ff; color: #6b21a8; vertical-align: middle; white-space: nowrap;">Output Tax</th>
+              <th style="width: 9.6%; padding: 4.5px 5px; text-align: right; border-right: 1px solid #e9d5ff; vertical-align: middle; white-space: nowrap;">Taxable (12%)</th>
+              <th style="width: 9.6%; padding: 4.5px 5px; text-align: right; border-right: 1px solid #e9d5ff; vertical-align: middle; white-space: nowrap;">Zero-Rated</th>
+              <th style="width: 9.6%; padding: 4.5px 5px; text-align: right; border-right: 1px solid #e9d5ff; vertical-align: middle; white-space: nowrap;">Exempt</th>
+              <th style="width: 9.6%; padding: 4.5px 5px; text-align: right; border-right: 1px solid #c084fc; background-color: #fef3c7; color: #b45309; vertical-align: middle; white-space: nowrap;">Input Tax</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="background-color: #ffffff; border-bottom: 2px solid #3b0764; font-weight: 700;">
+              <td style="padding: 7px 8px; font-weight: 800; font-size: 11px; color: #3b0764; border-right: 1px solid #d8b4fe; vertical-align: middle; white-space: nowrap;">
+                Adjusted
+              </td>
+              <td style="padding: 7px 6px; text-align: right; font-family: monospace; font-size: 10px; font-weight: 700; color: #0f172a; border-right: 1px solid #f3e8ff; vertical-align: middle; white-space: nowrap;">
+                ${formatPdfCurrency(adjustedTotals.salesColH)}
+              </td>
+              <td style="padding: 7px 6px; text-align: right; font-family: monospace; font-size: 10px; font-weight: 700; color: #64748b; border-right: 1px solid #f3e8ff; vertical-align: middle; white-space: nowrap;">
+                ${formatPdfCurrency(adjustedTotals.salesColG)}
+              </td>
+              <td style="padding: 7px 6px; text-align: right; font-family: monospace; font-size: 10px; font-weight: 700; color: #64748b; border-right: 1px solid #d8b4fe; vertical-align: middle; white-space: nowrap;">
+                ${formatPdfCurrency(adjustedTotals.salesColF)}
+              </td>
+              <td style="padding: 7px 6px; text-align: right; font-family: monospace; font-size: 10px; font-weight: 800; color: #6b21a8; background-color: #faf5ff; border-right: 1px solid #c084fc; vertical-align: middle; white-space: nowrap;">
+                ${formatPdfCurrency(adjustedTotals.salesColL)}
+              </td>
+              <td style="padding: 7px 6px; text-align: right; font-family: monospace; font-size: 10px; font-weight: 700; color: #0f172a; border-right: 1px solid #f3e8ff; vertical-align: middle; white-space: nowrap;">
+                ${formatPdfCurrency(adjustedTotals.purchasesColH)}
+              </td>
+              <td style="padding: 7px 6px; text-align: right; font-family: monospace; font-size: 10px; font-weight: 700; color: #64748b; border-right: 1px solid #f3e8ff; vertical-align: middle; white-space: nowrap;">
+                ${formatPdfCurrency(adjustedTotals.purchasesColG)}
+              </td>
+              <td style="padding: 7px 6px; text-align: right; font-family: monospace; font-size: 10px; font-weight: 700; color: #64748b; border-right: 1px solid #d8b4fe; vertical-align: middle; white-space: nowrap;">
+                ${formatPdfCurrency(adjustedTotals.purchasesColF)}
+              </td>
+              <td style="padding: 7px 6px; text-align: right; font-family: monospace; font-size: 10px; font-weight: 800; color: #b45309; background-color: #fffbeb; border-right: 1px solid #c084fc; vertical-align: middle; white-space: nowrap;">
+                ${formatPdfCurrency(adjustedTotals.purchasesColL)}
+              </td>
+              <td style="padding: 7px 8px; text-align: right; font-family: monospace; font-size: 10px; font-weight: 800; color: ${adjustedTotals.netVatPayable >= 0 ? '#4338ca' : '#dc2626'}; background-color: ${adjustedTotals.netVatPayable >= 0 ? '#f5f3ff' : '#fef2f2'}; vertical-align: middle; white-space: nowrap;">
+                ${formatPdfCurrency(adjustedTotals.netVatPayable)}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <!-- Comparison Variance Strip -->
+        <div style="background: linear-gradient(90deg, #f5f3ff, #faf5ff); border: 1px dashed #c084fc; border-radius: 4px; padding: 5px 10px; margin-top: 4px; display: flex; justify-content: space-between; align-items: center; font-size: 8.5px;">
+          <span style="font-weight: 800; color: #6b21a8; text-transform: uppercase; letter-spacing: 0.04em;">
+            Variance Summary (Actual vs. Adjusted):
+          </span>
+          <div style="display: flex; gap: 14px; font-weight: 700;">
+            <span style="color: #475569;">
+              Taxable Sales Diff: <strong style="color: #7c3aed; font-family: monospace; font-size: 9.5px;">-${formatPdfCurrency(actualTotals.salesColH - adjustedTotals.salesColH)}</strong>
+            </span>
+            <span style="color: #475569;">
+              Output VAT Diff: <strong style="color: #7c3aed; font-family: monospace; font-size: 9.5px;">-${formatPdfCurrency(actualTotals.salesColL - adjustedTotals.salesColL)}</strong>
+            </span>
+            <span style="color: #475569;">
+              Net VAT Payable Impact: <strong style="color: #4338ca; font-family: monospace; font-size: 9.5px;">-${formatPdfCurrency(actualTotals.netVatPayable - adjustedTotals.netVatPayable)}</strong>
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- BOTTOM SECTION: SUMMARY OF THE DEFERRALS -->
+      <div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <div style="width: 7px; height: 7px; border-radius: 2px; background-color: #059669;"></div>
+            <div style="font-size: 10px; font-weight: 800; color: #065f46; text-transform: uppercase; letter-spacing: 0.04em;">
+              3. Summary of Deferrals & Variance Reconciliation
+            </div>
+          </div>
+          <div style="font-size: 8px; color: #047857; font-weight: 600;">
+            ${hasActiveDeferral || effectivePrevQuarterHideAmount > 0 ? `${deferredCustomersList.length} transaction(s) + adjustments active` : 'No active deferrals (Identical)'}
+          </div>
+        </div>
+
+        <!-- Deferral Metric Cards (4 cards: Total Deferred Taxable, Output VAT, Prev Qtr Hide, Specific Customer Txns) -->
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 6px;">
+          <div style="background-color: #faf5ff; border: 1px solid #e9d5ff; border-radius: 4px; padding: 5px 8px;">
+            <div style="font-size: 7px; font-weight: 700; color: #7c3aed; text-transform: uppercase;">Total Deferred Taxable</div>
+            <div style="font-size: 10.5px; font-weight: 800; color: #581c87; margin-top: 1px;">${formatPdfCurrency(effectiveTotalDefTaxable)}</div>
+          </div>
+          <div style="background-color: #faf5ff; border: 1px solid #e9d5ff; border-radius: 4px; padding: 5px 8px;">
+            <div style="font-size: 7px; font-weight: 700; color: #7c3aed; text-transform: uppercase;">Total Deferred Output VAT</div>
+            <div style="font-size: 10.5px; font-weight: 800; color: #6b21a8; margin-top: 1px;">${formatPdfCurrency(effectiveTotalDefOutputTax)}</div>
+          </div>
+          <div style="background-color: #eef2ff; border: 1px solid #c7d2fe; border-radius: 4px; padding: 5px 8px;">
+            <div style="font-size: 7px; font-weight: 700; color: #4338ca; text-transform: uppercase;">Prev Qtr Hide Amount</div>
+            <div style="font-size: 10.5px; font-weight: 800; color: #312e81; margin-top: 1px;">${formatPdfCurrency(effectivePrevQuarterHideAmount)}</div>
+            <div style="font-size: 6.5px; color: #4338ca; font-weight: 600;">VAT: ${formatPdfCurrency(effectivePrevQuarterHideOutputTax)}</div>
+          </div>
+          <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px; padding: 5px 8px;">
+            <div style="font-size: 7px; font-weight: 700; color: #475569; text-transform: uppercase;">Specific Customer Txns</div>
+            <div style="font-size: 10.5px; font-weight: 800; color: #0f172a; margin-top: 1px;">${deferredCustomersList.length} item(s)</div>
+          </div>
+        </div>
+
+        <!-- Previous Quarter Hide Amount Banner if present -->
+        ${
+          effectivePrevQuarterHideAmount > 0
+            ? `
+          <div style="background-color: #eef2ff; border: 1px solid #c7d2fe; border-radius: 4px; padding: 5px 9px; margin-bottom: 5px; font-size: 8px; color: #312e81; display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <strong style="color: #1e1b4b;">Previous Quarter Hide Amount (Prior Period Carried Over):</strong>
+              <span style="font-family: monospace; font-weight: 700; color: #4338ca; margin-left: 4px;">
+                ₱ ${formatPdfCurrency(effectivePrevQuarterHideAmount)}
+              </span>
+              <span style="color: #4338ca; margin-left: 4px; font-weight: 600;">
+                (Corresponding Output Tax: ₱ ${formatPdfCurrency(effectivePrevQuarterHideOutputTax)})
+              </span>
+            </div>
+            <div style="font-size: 7.5px; color: #4338ca; font-style: italic;">
+              Tracked for variance reconciliation across quarterly filings
+            </div>
+          </div>
+        `
+            : ''
+        }
+
+        ${
+          page1DeferralItems.length > 0
+            ? `
+          <!-- Itemized Customer Deferrals Table -->
+          <table style="width: 100%; border-collapse: collapse; border: 1px solid #e9d5ff; border-radius: 4px; overflow: hidden; margin-top: 4px;">
+            <thead>
+              <tr style="background-color: #6b21a8; color: #ffffff; font-size: 7.5px; text-transform: uppercase;">
+                <th style="padding: 3px 6px; text-align: left; width: 18%;">Branch</th>
+                <th style="padding: 3px 6px; text-align: left; width: 28%;">Customer Name</th>
+                <th style="padding: 3px 6px; text-align: left; width: 16%;">Customer TIN</th>
+                <th style="padding: 3px 6px; text-align: left; width: 12%;">Month</th>
+                <th style="padding: 3px 6px; text-align: right; width: 13%;">Taxable Excluded</th>
+                <th style="padding: 3px 6px; text-align: right; width: 13%;">Output VAT Deferred</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${renderDeferredRows(page1DeferralItems)}
+            </tbody>
+          </table>
+          ${
+            isMultiPageDeferrals
+              ? `<div style="font-size: 7.5px; color: #7c3aed; font-style: italic; margin-top: 2px;">* Showing 3 of ${deferredCustomersList.length} deferred customer transactions. Full schedule continues on Page 2.</div>`
+              : ''
+          }
+        `
+            : hasActiveDeferral
+            ? `
+          <div style="background-color: #faf5ff; border: 1px solid #e9d5ff; border-radius: 4px; padding: 6px 10px; font-size: 8px; color: #6b21a8;">
+            <strong>Manual Pro-Rated Deferral Active:</strong> Taxable Sales of ₱ ${formatPdfCurrency(effectiveManualTaxable)} and Output VAT of ₱ ${formatPdfCurrency(effectiveManualOutputTax)} have been pro-rated across branches based on taxable sales ratio.
+          </div>
+        `
+            : `
+          <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 6px 10px; font-size: 8px; color: #475569; text-align: center;">
+            No sales or output tax deferrals were applied for this quarter. The Actual and Adjusted VAT schedules reflect identical figures.
+          </div>
+        `
+        }
+      </div>
+
+      <!-- Footer -->
+      <div style="margin-top: 10px; padding-top: 6px; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; font-size: 7.5px; color: #94a3b8;">
+        <div>BIR Multi-Branch Reconciliation Report • RR 16-2005 & RA 11976 eOPT Compliant</div>
+        <div>Generated: ${generatedTimestamp} • Page 1 of ${isMultiPageDeferrals ? '2' : '1'}</div>
+      </div>
+    </div>
+  `;
+
+  // Page 2 (if multi-page deferrals exist)
+  let page2Html = '';
+  if (isMultiPageDeferrals) {
+    page2Html = `
+      <div class="pdf-comparison-page" id="pdf-comp-page-2" style="width: 1120px; min-height: 792px; padding: 20px 28px; background-color: #ffffff; box-sizing: border-box;">
+        <!-- Compact Header -->
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1.5px solid #0f172a; padding-bottom: 6px; margin-bottom: 10px;">
+          <div>
+            <div style="font-size: 13px; font-weight: 800; color: #0f172a;">SCHEDULE OF DEFERRED SALES & OUTPUT TAX (FULL ITEMIZED BREAKDOWN)</div>
+            <div style="font-size: 8.5px; color: #64748b;">${client.registeredName || client.tradeName} • TIN: ${client.tin} • ${quarter} ${year}</div>
+          </div>
+          <div style="font-size: 8.5px; color: #475569; font-weight: 600;">Total Deferred: ${formatPdfCurrency(effectiveTotalDefTaxable)} (${deferredCustomersList.length} transactions)</div>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; border: 1px solid #cbd5e1; border-radius: 4px; overflow: hidden; margin-bottom: 12px;">
+          <thead>
+            <tr style="background-color: #3b0764; color: #ffffff; font-size: 8px; text-transform: uppercase;">
+              <th style="padding: 4px 6px; text-align: left; width: 16%;">Branch</th>
+              <th style="padding: 4px 6px; text-align: left; width: 30%;">Customer / Buyer Name</th>
+              <th style="padding: 4px 6px; text-align: left; width: 16%;">Customer TIN</th>
+              <th style="padding: 4px 6px; text-align: left; width: 12%;">Month</th>
+              <th style="padding: 4px 6px; text-align: right; width: 13%;">Taxable Amount</th>
+              <th style="padding: 4px 6px; text-align: right; width: 13%;">Output VAT Deferred</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${renderDeferredRows(deferredCustomersList)}
+          </tbody>
+        </table>
+
+        <!-- Pro-rating summary -->
+        <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px 14px; font-size: 8.5px;">
+          <div style="font-weight: 800; color: #1e1b4b; text-transform: uppercase; margin-bottom: 4px;">Branch Pro-Rating Allocation Notes:</div>
+          <div style="color: #475569; line-height: 1.5;">
+            Customer-specific deferrals are matched directly with their designated branch source filings. Any general manual deferral amount is proportionally allocated based on each branch's base taxable sales ratio.
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div style="margin-top: 16px; padding-top: 6px; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; font-size: 7.5px; color: #94a3b8;">
+          <div>BIR Multi-Branch Reconciliation Report • Page 2 of 2</div>
+          <div>Generated: ${generatedTimestamp}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  container.innerHTML = page1Html + page2Html;
+  document.body.appendChild(container);
+
+  try {
+    const pageEls = container.querySelectorAll('.pdf-comparison-page');
+    if (pageEls.length === 0) {
+      throw new Error('Failed to create PDF comparison pages');
+    }
+
+    const pdf = new jsPDF({
+      orientation: 'landscape',
+      unit: 'mm',
+      format: 'a4',
+      compress: true,
+    });
+
+    const pdfWidth = 297;
+    const pdfHeight = 210;
+
+    for (let i = 0; i < pageEls.length; i++) {
+      if (i > 0) {
+        pdf.addPage('a4', 'landscape');
+      }
+
+      const canvas = await html2canvas(pageEls[i] as HTMLElement, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        logging: false,
+      });
+
+      const imgData = canvas.toDataURL('image/png');
+      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
+    }
+
+    const companyName = (client.registeredName || client.tradeName || 'Taxpayer')
+      .trim()
+      .replace(/[^a-zA-Z0-9_-]/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/^_|_$/g, '');
+    const fileName = `BIR_VAT_Comparison_Actual_vs_Adjusted_${companyName}_${quarter}_${year}.pdf`;
+
+    pdf.save(fileName);
+  } finally {
     if (document.body.contains(container)) {
       document.body.removeChild(container);
     }

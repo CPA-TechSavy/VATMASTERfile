@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
 import { ClientProfile, Quarter } from '../types/tax';
+import { getRealTimeTaxPeriod } from './taxCalculations';
 import {
   BirTransactionRow,
   BirUploadedFileRecord,
@@ -329,7 +330,7 @@ export function parseBirSlspExcelFile(
   expectedMonth?: MonthIndex | 'consolidated',
   branchId?: string,
   branchName?: string,
-  expectedQuarter: Quarter = 'Q3'
+  expectedQuarter: Quarter = getRealTimeTaxPeriod().quarter
 ): BirUploadedFileRecord {
   const wb = XLSX.read(buffer, { type: 'array', cellFormula: true, cellHTML: false });
   const sheetName = wb.SheetNames[0];
@@ -603,7 +604,7 @@ export function downloadVatExcelTemplate(clientTradeName: string, quarter: strin
 
   downloadBirSlspExcelTemplate({
     type: 'Sales',
-    quarter: (quarter as Quarter) || 'Q3',
+    quarter: (quarter as Quarter) || getRealTimeTaxPeriod().quarter,
     monthLabel: '1st Month',
     client: dummyClient,
     includeSampleRow: false,
