@@ -1,0 +1,6 @@
+{
+  "name": "BIR Tax Return Calculator",
+  "description": "Multi-client Philippine tax returns computation, visual compliance calendar, and filing schedule tool for accounting firms covering BIR forms 1701Q, 1702Q, 2550Q, 2551Q, 1601-C, and 1601-EQ.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
