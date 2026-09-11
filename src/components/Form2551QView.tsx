@@ -2,9 +2,11 @@ import React, { useState } from 'react';
 import { Data2551Q, ClientProfile, Quarter } from '../types/tax';
 import { calculate2551Q } from '../utils/taxCalculations';
 import { formatPHP, parseNumber } from '../utils/formatters';
-import { AlertTriangle, Download } from 'lucide-react';
+import { AlertTriangle, Download, BookOpen, TrendingUp } from 'lucide-react';
 import { PenaltiesModal } from './PenaltiesModal';
 import { BranchVatSchedule } from './BranchVatSchedule';
+import { EoptSalesGuideModal } from './EoptSalesGuideModal';
+import { IncomeForecasting2551Q } from './IncomeForecasting2551Q';
 import { downloadBirSlspExcelTemplate } from '../utils/excelVatTemplate';
 
 interface Form2551QViewProps {
@@ -23,6 +25,7 @@ export const Form2551QView: React.FC<Form2551QViewProps> = ({
   onChange,
 }) => {
   const [showPenalties, setShowPenalties] = useState(false);
+  const [showEoptModal, setShowEoptModal] = useState(false);
 
   const result = calculate2551Q(data);
 
@@ -33,11 +36,37 @@ export const Form2551QView: React.FC<Form2551QViewProps> = ({
     });
   };
 
-  const handleSyncFromBranchSchedule = (totals: { grossSales: number; exemptSales: number }) => {
+  const handleSyncFromBranchSchedule = (totals: {
+    grossSales: number;
+    exemptSales: number;
+    vatableSales?: number;
+    salesToGovernment?: number;
+    zeroRatedSales?: number;
+    vatExemptSales?: number;
+  }) => {
     onChange({
       ...data,
       grossSalesCurrentQuarter: totals.grossSales,
       exemptSales: totals.exemptSales,
+      vatableSales: totals.vatableSales !== undefined ? totals.vatableSales : Math.max(0, totals.grossSales - totals.exemptSales),
+      salesToGovernment: totals.salesToGovernment || 0,
+      zeroRatedSales: totals.zeroRatedSales || 0,
+      vatExemptSales: totals.vatExemptSales !== undefined ? totals.vatExemptSales : totals.exemptSales,
+    });
+  };
+
+  const updateSalesComponent = (field: 'vatableSales' | 'salesToGovernment' | 'zeroRatedSales' | 'vatExemptSales', val: number) => {
+    const curVatable = field === 'vatableSales' ? val : (data.vatableSales ?? Math.max(0, (data.grossSalesCurrentQuarter || 0) - (data.exemptSales || 0)));
+    const curGov = field === 'salesToGovernment' ? val : (data.salesToGovernment || 0);
+    const curZero = field === 'zeroRatedSales' ? val : (data.zeroRatedSales || 0);
+    const curExempt = field === 'vatExemptSales' ? val : (data.vatExemptSales ?? data.exemptSales ?? 0);
+    const newCombined = curVatable + curGov + curZero + curExempt;
+
+    onChange({
+      ...data,
+      [field]: val,
+      grossSalesCurrentQuarter: newCombined,
+      exemptSales: curExempt + curZero,
     });
   };
 
@@ -47,7 +76,8 @@ export const Form2551QView: React.FC<Form2551QViewProps> = ({
       quarter,
       monthLabel: '1st Month',
       client,
-      includeSampleRow: true,
+      includeSampleRow: false,
+      formType: '2551Q',
     });
   };
 
@@ -99,9 +129,22 @@ export const Form2551QView: React.FC<Form2551QViewProps> = ({
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         <div className="lg:col-span-7 space-y-6">
-          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
-            <div className="text-xs font-bold uppercase tracking-wider text-slate-500">
-              Taxable Sales & Applicable Percentage Tax Code
+          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-5">
+            {/* Taxable Sales Header with eOPT Law button right beside the text */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+              <div className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                Taxable Sales & Applicable Percentage Tax Code
+              </div>
+              <button
+                type="button"
+                id="eopt-guidelines-btn"
+                onClick={() => setShowEoptModal(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-amber-950 bg-amber-100 hover:bg-amber-200 active:bg-amber-300 border border-amber-300 rounded-lg transition-all cursor-pointer shadow-2xs hover:shadow-xs"
+                title="Open instructions based on eOPT law on what includes as Gross Sales and what Sales are exempt, and other key details"
+              >
+                <BookOpen className="w-4 h-4 text-amber-800" />
+                <span>eOPT Law Instructions & Exemptions (RA 11976)</span>
+              </button>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -143,33 +186,121 @@ export const Form2551QView: React.FC<Form2551QViewProps> = ({
               </div>
             </div>
 
-            <div className="pt-2 space-y-3">
+            {/* Income Forecasting Graph / Table directly above Sales in the Quarter */}
+            <div className="pt-2">
+              <IncomeForecasting2551Q
+                client={client}
+                currentQuarter={quarter}
+                year={year}
+                currentQuarterData={data}
+                onApplyQuarterGrossSales={(q, gross, exempt) => {
+                  onChange({
+                    ...data,
+                    grossSalesCurrentQuarter: gross,
+                    ...(typeof exempt === 'number' ? { exemptSales: exempt } : {}),
+                  });
+                }}
+              />
+            </div>
+
+            {/* Sales in the Quarter */}
+            <div className="pt-4 space-y-3 border-t border-slate-200">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-bold uppercase tracking-wider text-slate-600">
+                  Sales in the Quarter (Schedule 1 Breakdown)
+                </div>
+                <span className="text-[11px] text-slate-400">
+                  Current Quarter ({quarter} {year}) Return Entry
+                </span>
+              </div>
+
+              {/* Combined Gross Sales Highlight */}
+              <div className="p-3 bg-amber-50/70 rounded-xl border border-amber-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <div className="text-xs font-bold text-amber-900 uppercase tracking-wide">
+                    Combined Gross Sales / Receipts
+                  </div>
+                  <div className="text-[11px] text-amber-700">
+                    Sum of Taxable, Govt, Zero-Rated, and Exempt Sales (Consistent with Form 1701Q)
+                  </div>
+                </div>
+                <div className="text-base font-mono font-bold text-amber-950 text-right">
+                  {formatPHP(result.grossSales)}
+                </div>
+              </div>
+
+              {/* 1. Vatable / Taxable Sales */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <label className="text-sm text-slate-700 font-medium">
-                  Gross Sales / Receipts (This Quarter)
-                </label>
+                <div>
+                  <label className="text-sm text-slate-700 font-medium">
+                    Vatable Sales / Subject to PT ({data.taxRatePercent}%)
+                  </label>
+                  <div className="text-[11px] text-slate-400">Column H in BIR SLSP Schedule</div>
+                </div>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
                   <input
-                    id="gross-sales-2551q"
+                    id="vatable-sales-2551q"
                     type="number"
-                    value={data.grossSalesCurrentQuarter || ''}
-                    onChange={(e) => updateField('grossSalesCurrentQuarter', parseNumber(e.target.value))}
+                    value={data.vatableSales !== undefined ? (data.vatableSales || '') : (result.taxableSales || '')}
+                    onChange={(e) => updateSalesComponent('vatableSales', parseNumber(e.target.value))}
                     placeholder="0.00"
                     className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500"
                   />
                 </div>
               </div>
 
+              {/* 2. Sales to Government */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <label className="text-sm text-slate-700">Exempt Sales / Receipts</label>
+                <div>
+                  <label className="text-sm text-slate-700 font-medium">Sales to Government</label>
+                  <div className="text-[11px] text-slate-400">Subject to PT withholding</div>
+                </div>
+                <div className="relative w-full sm:w-60">
+                  <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
+                  <input
+                    id="govt-sales-2551q"
+                    type="number"
+                    value={data.salesToGovernment !== undefined ? (data.salesToGovernment || '') : ''}
+                    onChange={(e) => updateSalesComponent('salesToGovernment', parseNumber(e.target.value))}
+                    placeholder="0.00"
+                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500"
+                  />
+                </div>
+              </div>
+
+              {/* 3. Zero-Rated Sales */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <label className="text-sm text-slate-700 font-medium">Zero-Rated Sales (0%)</label>
+                  <div className="text-[11px] text-slate-400">Column G in BIR SLSP Schedule</div>
+                </div>
+                <div className="relative w-full sm:w-60">
+                  <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
+                  <input
+                    id="zero-rated-2551q"
+                    type="number"
+                    value={data.zeroRatedSales !== undefined ? (data.zeroRatedSales || '') : ''}
+                    onChange={(e) => updateSalesComponent('zeroRatedSales', parseNumber(e.target.value))}
+                    placeholder="0.00"
+                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500"
+                  />
+                </div>
+              </div>
+
+              {/* 4. VAT-Exempt Sales */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <label className="text-sm text-slate-700 font-medium">VAT-Exempt Sales / Receipts</label>
+                  <div className="text-[11px] text-slate-400">Column F in BIR SLSP Schedule</div>
+                </div>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
                   <input
                     id="exempt-sales-2551q"
                     type="number"
-                    value={data.exemptSales || ''}
-                    onChange={(e) => updateField('exemptSales', parseNumber(e.target.value))}
+                    value={data.vatExemptSales !== undefined ? (data.vatExemptSales || '') : (data.exemptSales || '')}
+                    onChange={(e) => updateSalesComponent('vatExemptSales', parseNumber(e.target.value))}
                     placeholder="0.00"
                     className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500"
                   />
@@ -188,7 +319,6 @@ export const Form2551QView: React.FC<Form2551QViewProps> = ({
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
                   <div className="text-sm text-slate-700">Form 2307 Creditable Percentage Tax Withheld</div>
-                  <div className="text-xs text-slate-400">Withheld by top withholding agents / govt</div>
                 </div>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
@@ -289,6 +419,11 @@ export const Form2551QView: React.FC<Form2551QViewProps> = ({
         onClose={() => setShowPenalties(false)}
         basicTaxDue={result.netPercentageTaxPayable}
         formName={`BIR Form 2551Q (${quarter} ${year})`}
+      />
+
+      <EoptSalesGuideModal
+        isOpen={showEoptModal}
+        onClose={() => setShowEoptModal(false)}
       />
     </div>
   );

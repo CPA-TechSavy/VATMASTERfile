@@ -17,6 +17,11 @@ import {
   Info,
   Calendar,
   Percent,
+  Lightbulb,
+  Wallet,
+  Scale,
+  FileText,
+  ArrowRight,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -39,6 +44,7 @@ export interface IncomeForecasting2551QProps {
   currentQuarterData: Data2551Q;
   allQuarterDataMap?: Record<string, Data2551Q>;
   onApplyQuarterGrossSales?: (quarter: Quarter, grossSales: number, exemptSales: number) => void;
+  defaultViewMode?: 'graph' | 'table' | 'insights';
 }
 
 const QUARTERS: Quarter[] = ['Q1', 'Q2', 'Q3', 'Q4'];
@@ -63,7 +69,7 @@ interface QuarterForecastItem {
   source: 'actual' | 'current_form' | 'forecast_rule' | 'manual_override';
 }
 
-type ForecastMethod = 'growth_rate' | 'historical_average' | 'manual';
+type ForecastMethod = 'growth_rate';
 
 interface StoredForecastSettings {
   method: ForecastMethod;
@@ -80,15 +86,19 @@ export const IncomeForecasting2551Q: React.FC<IncomeForecasting2551QProps> = ({
   currentQuarterData,
   allQuarterDataMap = {},
   onApplyQuarterGrossSales,
+  defaultViewMode = 'table',
 }) => {
   const storageKey = `bir_2551q_forecast_${client.id}_${year}`;
 
   // State: Settings
-  const [method, setMethod] = useState<ForecastMethod>('growth_rate');
+  const method: ForecastMethod = 'growth_rate';
   const [growthPercent, setGrowthPercent] = useState<number>(5); // default 5% QoQ growth
   const [manualGrossSales, setManualGrossSales] = useState<Partial<Record<Quarter, number>>>({});
   const [manualExemptSales, setManualExemptSales] = useState<Partial<Record<Quarter, number>>>({});
   const [activeChartTab, setActiveChartTab] = useState<'quarterly' | 'cumulative'>('quarterly');
+  const [viewMode, setViewMode] = useState<'graph' | 'table' | 'insights'>(
+    defaultViewMode === ('both' as any) ? 'table' : defaultViewMode
+  );
   const [showGuide, setShowGuide] = useState<boolean>(false);
   const [notificationMsg, setNotificationMsg] = useState<string | null>(null);
 
@@ -98,7 +108,6 @@ export const IncomeForecasting2551Q: React.FC<IncomeForecasting2551QProps> = ({
       const saved = localStorage.getItem(storageKey);
       if (saved) {
         const parsed: StoredForecastSettings = JSON.parse(saved);
-        if (parsed.method) setMethod(parsed.method);
         if (typeof parsed.annualGrowthPercent === 'number') setGrowthPercent(parsed.annualGrowthPercent);
         if (parsed.manualGrossSales) setManualGrossSales(parsed.manualGrossSales);
         if (parsed.manualExemptSales) setManualExemptSales(parsed.manualExemptSales);
@@ -110,7 +119,7 @@ export const IncomeForecasting2551Q: React.FC<IncomeForecasting2551QProps> = ({
 
   // Persist forecast preferences
   const savePreferences = (
-    newMethod = method,
+    newMethod: ForecastMethod = method,
     newGrowth = growthPercent,
     newGross = manualGrossSales,
     newExempt = manualExemptSales
@@ -153,7 +162,7 @@ export const IncomeForecasting2551Q: React.FC<IncomeForecasting2551QProps> = ({
 
     // Try reading directly from localStorage for that quarter
     try {
-      const savedMap = localStorage.getItem('bir_tax_data_2551Q');
+      const savedMap = localStorage.getItem('bir_app_data_v1_2551Q') || localStorage.getItem('bir_tax_data_2551Q');
       if (savedMap) {
         const parsed = JSON.parse(savedMap);
         const data = parsed[quarterKey];
@@ -281,8 +290,8 @@ export const IncomeForecasting2551Q: React.FC<IncomeForecasting2551QProps> = ({
           gross = manualGrossSales[q] || 0;
           exempt = manualExemptSales[q] !== undefined ? manualExemptSales[q] || 0 : 0;
           source = 'manual_override';
-        } else if (method === 'growth_rate') {
-          // Compound from previous quarter
+        } else {
+          // Compound from previous quarter using QoQ Growth Rate
           const prevGross = i > 0 ? result[i - 1].grossSales : avgHistoricalGross;
           const factor = 1 + (growthPercent / 100);
           gross = Math.max(0, Math.round(prevGross * factor));
@@ -292,18 +301,6 @@ export const IncomeForecasting2551Q: React.FC<IncomeForecasting2551QProps> = ({
             : 0;
           exempt = Math.round(gross * exemptRatio);
           source = 'forecast_rule';
-        } else if (method === 'historical_average') {
-          gross = Math.round(avgHistoricalGross);
-          const exemptRatio = currentQuarterData.grossSalesCurrentQuarter > 0
-            ? (currentQuarterData.exemptSales || 0) / currentQuarterData.grossSalesCurrentQuarter
-            : 0;
-          exempt = Math.round(gross * exemptRatio);
-          source = 'forecast_rule';
-        } else {
-          // Manual fallback if no override
-          gross = Math.round(avgHistoricalGross);
-          exempt = 0;
-          source = 'manual_override';
         }
 
         // Estimate 2307 withholding (usually ~1% or 2% if withholding agent clients)
@@ -394,6 +391,15 @@ export const IncomeForecasting2551Q: React.FC<IncomeForecasting2551QProps> = ({
     };
   }, [forecastItems]);
 
+  const activeItem = useMemo(
+    () => forecastItems.find((item) => item.quarter === currentQuarter),
+    [forecastItems, currentQuarter]
+  );
+  const nextQuarterItem = useMemo(
+    () => forecastItems.find((item) => item.isForecasted),
+    [forecastItems]
+  );
+
   // Chart Data Preparation
   const chartData = useMemo(() => {
     let cumGross = 0;
@@ -437,7 +443,6 @@ export const IncomeForecasting2551Q: React.FC<IncomeForecasting2551QProps> = ({
     setManualGrossSales({});
     setManualExemptSales({});
     setGrowthPercent(5);
-    setMethod('growth_rate');
     savePreferences('growth_rate', 5, {}, {});
     setNotificationMsg('Forecast reset to automated projection model.');
     setTimeout(() => setNotificationMsg(null), 3500);
@@ -477,10 +482,6 @@ export const IncomeForecasting2551Q: React.FC<IncomeForecasting2551QProps> = ({
           <h3 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
             Quarterly Income Run-Rate & Annual 2551Q Projection
           </h3>
-          <p className="text-xs text-slate-300 max-w-2xl">
-            Forecast upcoming quarterly gross income and percentage tax liabilities for {client.tradeName}.
-            Track progress toward the statutory ₱3,000,000.00 annual VAT threshold.
-          </p>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap shrink-0">
@@ -629,7 +630,7 @@ export const IncomeForecasting2551Q: React.FC<IncomeForecasting2551QProps> = ({
         )}
       </div>
 
-      {/* Control Bar: Forecast Method & Parameter Adjustment */}
+      {/* Control Bar: Forecast Model (QoQ Growth Rate) & Parameter Adjustment */}
       <div className="p-4 bg-white border-b border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
@@ -637,92 +638,108 @@ export const IncomeForecasting2551Q: React.FC<IncomeForecasting2551QProps> = ({
             Forecast Model:
           </span>
 
-          <div className="inline-flex bg-slate-100 p-0.5 rounded-lg text-xs font-medium border border-slate-200">
-            <button
-              type="button"
-              id="forecast-model-growth-btn"
-              onClick={() => {
-                setMethod('growth_rate');
-                savePreferences('growth_rate', growthPercent, manualGrossSales, manualExemptSales);
-              }}
-              className={`px-3 py-1.5 rounded-md transition-all cursor-pointer ${
-                method === 'growth_rate'
-                  ? 'bg-white text-slate-900 shadow-2xs font-semibold'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              📈 QoQ Growth Rate
-            </button>
-            <button
-              type="button"
-              id="forecast-model-average-btn"
-              onClick={() => {
-                setMethod('historical_average');
-                savePreferences('historical_average', growthPercent, manualGrossSales, manualExemptSales);
-              }}
-              className={`px-3 py-1.5 rounded-md transition-all cursor-pointer ${
-                method === 'historical_average'
-                  ? 'bg-white text-slate-900 shadow-2xs font-semibold'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              ⚖️ Average Run-Rate
-            </button>
-            <button
-              type="button"
-              id="forecast-model-manual-btn"
-              onClick={() => {
-                setMethod('manual');
-                savePreferences('manual', growthPercent, manualGrossSales, manualExemptSales);
-              }}
-              className={`px-3 py-1.5 rounded-md transition-all cursor-pointer ${
-                method === 'manual'
-                  ? 'bg-white text-slate-900 shadow-2xs font-semibold'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              ✏️ Manual Custom Overrides
-            </button>
+          <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 text-amber-900 border border-amber-200 rounded-lg text-xs font-semibold shadow-2xs">
+            <span>📈 QoQ Growth Rate</span>
           </div>
         </div>
 
-        {/* Growth Rate Stepper / Preset if Growth Method is Active */}
-        {method === 'growth_rate' && (
-          <div className="flex items-center gap-3 flex-wrap">
-            <span className="text-xs text-slate-600 font-medium">Assumed QoQ Growth:</span>
-            <div className="flex items-center gap-1.5">
-              {[-5, 0, 5, 10, 15, 20].map((preset) => (
-                <button
-                  key={preset}
-                  type="button"
-                  onClick={() => {
-                    setGrowthPercent(preset);
-                    savePreferences(method, preset, manualGrossSales, manualExemptSales);
-                  }}
-                  className={`px-2 py-1 text-xs font-mono rounded cursor-pointer transition-colors ${
-                    growthPercent === preset
-                      ? 'bg-amber-600 text-white font-bold shadow-xs'
-                      : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
-                  }`}
-                >
-                  {preset > 0 ? `+${preset}%` : `${preset}%`}
-                </button>
-              ))}
+        {/* Growth Rate Stepper / Preset */}
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="text-xs text-slate-600 font-medium">Assumed QoQ Growth:</span>
+          <div className="flex items-center gap-1.5">
+            {[-5, 0, 5, 10, 15, 20].map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                id={`preset-${preset}-btn`}
+                onClick={() => {
+                  setGrowthPercent(preset);
+                  savePreferences(method, preset, manualGrossSales, manualExemptSales);
+                }}
+                className={`px-2 py-1 text-xs font-mono rounded cursor-pointer transition-colors ${
+                  growthPercent === preset
+                    ? 'bg-amber-600 text-white font-bold shadow-xs'
+                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
+                }`}
+              >
+                {preset > 0 ? `+${preset}%` : `${preset}%`}
+              </button>
+            ))}
 
-              <div className="flex items-center pl-2">
-                <input
-                  type="number"
-                  value={growthPercent}
-                  onChange={(e) => {
-                    const num = parseNumber(e.target.value);
-                    setGrowthPercent(num);
-                    savePreferences(method, num, manualGrossSales, manualExemptSales);
-                  }}
-                  className="w-16 px-2 py-1 text-xs font-mono text-center border border-slate-300 rounded focus:ring-1 focus:ring-amber-500"
-                />
-                <span className="text-xs text-slate-500 ml-1">%</span>
-              </div>
+            <div className="flex items-center pl-2">
+              <input
+                type="number"
+                value={growthPercent}
+                onChange={(e) => {
+                  const num = parseNumber(e.target.value);
+                  setGrowthPercent(num);
+                  savePreferences(method, num, manualGrossSales, manualExemptSales);
+                }}
+                className="w-16 px-2 py-1 text-xs font-mono text-center border border-slate-300 rounded focus:ring-1 focus:ring-amber-500"
+              />
+              <span className="text-xs text-slate-500 ml-1">%</span>
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* View Switcher: Table / Graph / Decision Insights */}
+      <div className="bg-slate-100/90 px-4 py-2.5 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-xs font-semibold text-slate-600 mr-1">Forecast View:</span>
+          <button
+            type="button"
+            id="view-mode-table-btn"
+            onClick={() => setViewMode('table')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+              viewMode === 'table'
+                ? 'bg-amber-600 text-white shadow-xs'
+                : 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-200'
+            }`}
+          >
+            <Calendar className="w-3.5 h-3.5" />
+            <span>📋 Forecast Table</span>
+          </button>
+          <button
+            type="button"
+            id="view-mode-graph-btn"
+            onClick={() => setViewMode('graph')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+              viewMode === 'graph'
+                ? 'bg-amber-600 text-white shadow-xs'
+                : 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-200'
+            }`}
+          >
+            <BarChart3 className="w-3.5 h-3.5" />
+            <span>📊 Forecast Graph</span>
+          </button>
+          <button
+            type="button"
+            id="view-mode-insights-btn"
+            onClick={() => setViewMode('insights')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+              viewMode === 'insights'
+                ? 'bg-amber-600 text-white shadow-xs'
+                : 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-200'
+            }`}
+          >
+            <Lightbulb className="w-3.5 h-3.5" />
+            <span>💡 Decision Insights</span>
+          </button>
+        </div>
+
+        {/* Quick Apply Button for Active Quarter */}
+        {activeItem && (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => handleApplyToQuarter(currentQuarter)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-amber-950 bg-amber-200 hover:bg-amber-300 border border-amber-300 rounded-lg transition-colors cursor-pointer shadow-2xs"
+              title={`Load forecasted gross sales of ${formatPHP(activeItem.grossSales)} into active ${currentQuarter} return`}
+            >
+              <CheckCircle2 className="w-3.5 h-3.5 text-amber-800" />
+              <span>Apply {currentQuarter} Forecast ({formatPHP(activeItem.grossSales)})</span>
+            </button>
           </div>
         )}
       </div>
@@ -730,6 +747,7 @@ export const IncomeForecasting2551Q: React.FC<IncomeForecasting2551QProps> = ({
       {/* Main Grid: Forecasting Table + Visual Chart */}
       <div className="p-4 sm:p-5 space-y-6">
         {/* Section 1: Forecasting Table */}
+        {viewMode === 'table' && (
         <div className="space-y-3">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
@@ -958,9 +976,11 @@ export const IncomeForecasting2551Q: React.FC<IncomeForecasting2551QProps> = ({
             </table>
           </div>
         </div>
+        )}
 
         {/* Section 2: Visual Forecast Graph */}
-        <div className="pt-2 border-t border-slate-200 space-y-4">
+        {viewMode === 'graph' && (
+        <div className="space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <BarChart3 className="w-4 h-4 text-amber-600" />
@@ -1146,52 +1166,214 @@ export const IncomeForecasting2551Q: React.FC<IncomeForecasting2551QProps> = ({
                 )}
               </ResponsiveContainer>
             </div>
+          </div>
+        </div>
+        )}
 
-            {/* Chart Footer Highlights */}
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mt-4 pt-3 border-t border-slate-200 text-xs">
-              <div className="p-2.5 bg-white rounded-lg border border-slate-200">
-                <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block">
-                  Projected Annual Sales
-                </span>
-                <span className="text-sm font-bold font-mono text-slate-900">
-                  {formatPHP(annualTotals.totalGross)}
-                </span>
+        {/* Section 3: Decision Intelligence & Tax Strategy Cards */}
+        {viewMode === 'insights' && (
+          <div className="pt-2 border-t border-slate-200 space-y-4">
+            <div className="flex items-center gap-2">
+              <Lightbulb className="w-4 h-4 text-amber-600" />
+              <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                Strategic Tax Decision Insights & Regulatory Action Items
+              </h4>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Insight Card 1: VAT Threshold Watchdog */}
+              <div className={`p-4 rounded-xl border ${
+                annualTotals.isExceeded
+                  ? 'bg-rose-50/80 border-rose-200 text-rose-950'
+                  : annualTotals.isClose
+                  ? 'bg-amber-50/80 border-amber-200 text-amber-950'
+                  : 'bg-emerald-50/80 border-emerald-200 text-emerald-950'
+              }`}>
+                <div className="flex items-start gap-3">
+                  <div className={`p-2 rounded-lg ${
+                    annualTotals.isExceeded
+                      ? 'bg-rose-100 text-rose-700'
+                      : annualTotals.isClose
+                      ? 'bg-amber-100 text-amber-700'
+                      : 'bg-emerald-100 text-emerald-700'
+                  }`}>
+                    {annualTotals.isExceeded ? (
+                      <ShieldAlert className="w-5 h-5" />
+                    ) : (
+                      <ShieldCheck className="w-5 h-5" />
+                    )}
+                  </div>
+                  <div className="space-y-1.5 flex-1">
+                    <div className="flex items-center justify-between">
+                      <h5 className="text-sm font-bold">
+                        ₱3M VAT Threshold Watchdog (Sec. 236-G)
+                      </h5>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full font-bold bg-white/70">
+                        {annualTotals.thresholdPercent}% of ₱3M
+                      </span>
+                    </div>
+                    <p className="text-xs leading-relaxed opacity-90">
+                      {annualTotals.isExceeded ? (
+                        <>
+                          <strong>CRITICAL BREACH:</strong> Forecasted gross sales of{' '}
+                          <span className="font-mono font-bold">{formatPHP(annualTotals.totalGross)}</span> exceed
+                          the statutory ₱3,000,000 non-VAT ceiling. Taxpayer must file{' '}
+                          <strong>BIR Form 1905</strong> with their RDO within 30 days of the month following the breach to
+                          convert to 12% Value-Added Tax (Form 2550Q), and claim Transitional Input Tax (Sec. 111).
+                        </>
+                      ) : annualTotals.isClose ? (
+                        <>
+                          <strong>ELEVATED MONITORING:</strong> Taxpayer is within 20% of the VAT ceiling with only{' '}
+                          <span className="font-mono font-bold">{formatPHP(annualTotals.remainingToThreshold)}</span>{' '}
+                          cushion remaining. If revenue spikes in later quarters, prepare accounting systems for VAT invoice transitions.
+                        </>
+                      ) : (
+                        <>
+                          <strong>SAFE NON-VAT STATUS:</strong> Projected sales remain comfortably within the Non-VAT threshold with{' '}
+                          <span className="font-mono font-bold">{formatPHP(annualTotals.remainingToThreshold)}</span>{' '}
+                          headroom. The taxpayer is fully eligible to continue filing quarterly Percentage Tax Form 2551Q at 3%.
+                        </>
+                      )}
+                    </p>
+                  </div>
+                </div>
               </div>
 
-              <div className="p-2.5 bg-white rounded-lg border border-slate-200">
-                <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block">
-                  Average Run-Rate
-                </span>
-                <span className="text-sm font-bold font-mono text-amber-700">
-                  {formatPHP(annualTotals.avgQuarterGross)} / quarter
-                </span>
+              {/* Insight Card 2: 3% Tax Cash Reserve Planner */}
+              <div className="p-4 rounded-xl border bg-blue-50/80 border-blue-200 text-blue-950">
+                <div className="flex items-start gap-3">
+                  <div className="p-2 rounded-lg bg-blue-100 text-blue-700">
+                    <Wallet className="w-5 h-5" />
+                  </div>
+                  <div className="space-y-1.5 flex-1">
+                    <h5 className="text-sm font-bold">
+                      Recommended 3% Percentage Tax Cash Reserve
+                    </h5>
+                    <p className="text-xs leading-relaxed opacity-90">
+                      Based on forecasted annual taxable sales of{' '}
+                      <span className="font-mono font-bold">{formatPHP(annualTotals.totalTaxable)}</span>, the total projected
+                      percentage tax liability is{' '}
+                      <span className="font-mono font-bold text-blue-800">{formatPHP(annualTotals.totalTaxDue)}</span>.
+                    </p>
+                    <div className="pt-1 flex items-center gap-3 text-xs font-mono">
+                      <div className="bg-white/80 px-2.5 py-1 rounded border border-blue-200">
+                        <span className="text-[10px] text-slate-500 block uppercase">Per Quarter Buffer</span>
+                        <strong className="text-blue-900">{formatPHP(annualTotals.totalTaxDue / 4)}</strong>
+                      </div>
+                      <div className="bg-white/80 px-2.5 py-1 rounded border border-blue-200">
+                        <span className="text-[10px] text-slate-500 block uppercase">Monthly Allocation</span>
+                        <strong className="text-blue-900">{formatPHP(annualTotals.totalTaxDue / 12)}</strong>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
 
-              <div className="p-2.5 bg-white rounded-lg border border-slate-200">
-                <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block">
-                  Total Annual 3% Tax Due
-                </span>
-                <span className="text-sm font-bold font-mono text-slate-900">
-                  {formatPHP(annualTotals.totalTaxDue)}
-                </span>
+              {/* Insight Card 3: 8% Flat Tax Option vs 2551Q */}
+              <div className="p-4 rounded-xl border bg-purple-50/80 border-purple-200 text-purple-950">
+                <div className="flex items-start gap-3">
+                  <div className="p-2 rounded-lg bg-purple-100 text-purple-700">
+                    <Scale className="w-5 h-5" />
+                  </div>
+                  <div className="space-y-1.5 flex-1">
+                    <h5 className="text-sm font-bold">
+                      8% Gross Income Tax Alternative (Form 1701Q)
+                    </h5>
+                    <p className="text-xs leading-relaxed opacity-90">
+                      Under the TRAIN Law (RA 10963) & eOPT, self-employed individuals & professionals whose gross sales do not
+                      exceed ₱3M can elect the <strong>8% income tax rate</strong> on gross receipts in excess of ₱250,000.
+                    </p>
+                    <p className="text-[11px] font-medium text-purple-900 bg-white/70 p-2 rounded border border-purple-200">
+                      💡 <em>Advantage:</em> Electing the 8% option <strong>completely exempts</strong> the taxpayer from filing Form 2551Q
+                      and paying the 3% percentage tax, saving both compliance overhead and cash flow for high-margin service providers.
+                    </p>
+                  </div>
+                </div>
               </div>
 
-              <div
-                className={`p-2.5 rounded-lg border ${
-                  annualTotals.isExceeded
-                    ? 'bg-rose-50 border-rose-200 text-rose-900'
-                    : 'bg-emerald-50 border-emerald-200 text-emerald-900'
-                }`}
-              >
-                <span className="text-[10px] font-semibold uppercase tracking-wider block opacity-80">
-                  {annualTotals.isExceeded ? 'Threshold Status' : 'Non-VAT Headroom'}
-                </span>
-                <span className="text-sm font-bold font-mono">
-                  {annualTotals.isExceeded
-                    ? 'Breached (Mandatory VAT)'
-                    : formatPHP(annualTotals.remainingToThreshold)}
-                </span>
+              {/* Insight Card 4: Form 2307 Creditable Withholding Tax Strategy */}
+              <div className="p-4 rounded-xl border bg-amber-50/80 border-amber-200 text-amber-950">
+                <div className="flex items-start gap-3">
+                  <div className="p-2 rounded-lg bg-amber-100 text-amber-700">
+                    <FileText className="w-5 h-5" />
+                  </div>
+                  <div className="space-y-1.5 flex-1">
+                    <h5 className="text-sm font-bold">
+                      Form 2307 CWT Credit Collection Strategy
+                    </h5>
+                    <p className="text-xs leading-relaxed opacity-90">
+                      Estimated withholding tax credits of{' '}
+                      <span className="font-mono font-bold text-amber-900">-{formatPHP(annualTotals.totalCwt, false)}</span>{' '}
+                      are factored into this forecast. Top withholding agents withhold 1% on goods and 2% on services.
+                    </p>
+                    <p className="text-[11px] opacity-90">
+                      Ensure actual signed BIR Form 2307 certificates are requested from corporate clients each quarter before filing
+                      to legally offset against Line 17 Net Tax Payable.
+                    </p>
+                  </div>
+                </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Global Annual Highlights & Decision Summary Bar (Always Visible) */}
+        <div className="pt-2 border-t border-slate-200">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+            <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs">
+              <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block">
+                Projected Annual Sales ({year})
+              </span>
+              <span className="text-base font-bold font-mono text-slate-900 mt-0.5 block">
+                {formatPHP(annualTotals.totalGross)}
+              </span>
+              <span className="text-[11px] text-slate-500">
+                Taxable: {formatPHP(annualTotals.totalTaxable)}
+              </span>
+            </div>
+
+            <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs">
+              <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block">
+                Average Run-Rate
+              </span>
+              <span className="text-base font-bold font-mono text-amber-700 mt-0.5 block">
+                {formatPHP(annualTotals.avgQuarterGross)}
+              </span>
+              <span className="text-[11px] text-slate-500">
+                per quarter run-rate
+              </span>
+            </div>
+
+            <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs">
+              <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block">
+                Total Annual 3% Tax Due
+              </span>
+              <span className="text-base font-bold font-mono text-slate-900 mt-0.5 block">
+                {formatPHP(annualTotals.totalTaxDue)}
+              </span>
+              <span className="text-[11px] text-emerald-600 font-mono">
+                Net Pay: {formatPHP(annualTotals.totalNetPayable)}
+              </span>
+            </div>
+
+            <div
+              className={`p-3 rounded-xl border shadow-2xs ${
+                annualTotals.isExceeded
+                  ? 'bg-rose-50 border-rose-200 text-rose-900'
+                  : 'bg-emerald-50 border-emerald-200 text-emerald-900'
+              }`}
+            >
+              <span className="text-[10px] font-semibold uppercase tracking-wider block opacity-80">
+                {annualTotals.isExceeded ? 'Threshold Status' : 'Non-VAT Headroom'}
+              </span>
+              <span className="text-base font-bold font-mono mt-0.5 block">
+                {annualTotals.isExceeded
+                  ? 'Breached (Mandatory VAT)'
+                  : formatPHP(annualTotals.remainingToThreshold)}
+              </span>
+              <span className="text-[11px] opacity-80">
+                {annualTotals.thresholdPercent}% of ₱3M ceiling
+              </span>
             </div>
           </div>
         </div>

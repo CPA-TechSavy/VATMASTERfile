@@ -18,7 +18,7 @@ import {
 
 interface ClientHeaderProps {
   clients: ClientProfile[];
-  activeClient: ClientProfile;
+  activeClient: ClientProfile | null;
   onSelectClient: (client: ClientProfile) => void;
   onOpenAddClient: () => void;
   onOpenEditClient: () => void;
@@ -80,8 +80,12 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
   onImportData,
   onOpenCalendar,
 }) => {
-  const badge = getClassificationBadge(activeClient.classification);
-  const isCorp = activeClient.classification === 'Corporation' || activeClient.classification === 'Non-Stock' || activeClient.classification === 'Partnership';
+  const badge = activeClient ? getClassificationBadge(activeClient.classification) : null;
+  const isCorp = activeClient
+    ? activeClient.classification === 'Corporation' ||
+      activeClient.classification === 'Non-Stock' ||
+      activeClient.classification === 'Partnership'
+    : false;
 
   // Real-time tax period calculation (follows system device date)
   const realTimePeriod = useMemo(() => getRealTimeTaxPeriod(), []);
@@ -237,46 +241,54 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
               Active Client:
             </span>
 
-            <select
-              id="active-client-select"
-              value={activeClient.id}
-              onChange={(e) => {
-                const found = clients.find((c) => c.id === e.target.value);
-                if (found) onSelectClient(found);
-              }}
-              className="px-3 py-1.5 text-sm font-semibold text-slate-900 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 max-w-xs truncate"
-            >
-              {clients.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.tradeName} ({c.tin})
-                </option>
-              ))}
-            </select>
+            {activeClient ? (
+              <>
+                <select
+                  id="active-client-select"
+                  value={activeClient.id}
+                  onChange={(e) => {
+                    const found = clients.find((c) => c.id === e.target.value);
+                    if (found) onSelectClient(found);
+                  }}
+                  className="px-3 py-1.5 text-sm font-semibold text-slate-900 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 max-w-xs truncate"
+                >
+                  {clients.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.tradeName} ({c.tin})
+                    </option>
+                  ))}
+                </select>
 
-            <button
-              id="edit-active-client-btn"
-              onClick={onOpenEditClient}
-              className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
-              title="Edit active client details"
-            >
-              <Edit2 className="w-3.5 h-3.5" />
-            </button>
+                <button
+                  id="edit-active-client-btn"
+                  onClick={onOpenEditClient}
+                  className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                  title="Edit active client details"
+                >
+                  <Edit2 className="w-3.5 h-3.5" />
+                </button>
 
-            {onDeleteClient && (
-              <button
-                id="delete-active-client-btn"
-                onClick={onDeleteClient}
-                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                title={`Delete ${activeClient.tradeName}`}
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
+                {onDeleteClient && (
+                  <button
+                    id="delete-active-client-btn"
+                    onClick={onDeleteClient}
+                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                    title={`Delete ${activeClient.tradeName}`}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </>
+            ) : (
+              <span className="text-xs font-semibold px-2.5 py-1 bg-slate-100 text-slate-500 rounded-md border border-slate-200">
+                No Client Registered (Clean Slate)
+              </span>
             )}
 
             <button
               id="add-new-client-btn"
               onClick={onOpenAddClient}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg transition-colors"
+              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-2xs transition-colors cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Add Client</span>
@@ -284,33 +296,35 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
           </div>
 
           {/* Client Details Badges */}
-          <div className="flex items-center gap-2 flex-wrap text-xs">
-            <span
-              className={`px-2.5 py-1 rounded-md border font-medium ${badge.color}`}
-            >
-              {badge.text}
-            </span>
-
-            <span
-              className={`px-2.5 py-1 rounded-md border font-medium ${
-                activeClient.vatStatus === 'vat-registered'
-                  ? 'bg-violet-50 text-violet-700 border-violet-200'
-                  : 'bg-amber-50 text-amber-700 border-amber-200'
-              }`}
-            >
-              {activeClient.vatStatus === 'vat-registered' ? 'VAT Registered (12%)' : 'Non-VAT (3%)'}
-            </span>
-
-            {activeClient.isWithholdingAgent && (
-              <span className="px-2.5 py-1 rounded-md border bg-emerald-50 text-emerald-700 border-emerald-200 font-medium">
-                Withholding Agent
+          {activeClient && badge && (
+            <div className="flex items-center gap-2 flex-wrap text-xs">
+              <span
+                className={`px-2.5 py-1 rounded-md border font-medium ${badge.color}`}
+              >
+                {badge.text}
               </span>
-            )}
 
-            <span className="text-slate-500 font-mono hidden sm:inline">
-              {activeClient.rdo}
-            </span>
-          </div>
+              <span
+                className={`px-2.5 py-1 rounded-md border font-medium ${
+                  activeClient.vatStatus === 'vat-registered'
+                    ? 'bg-violet-50 text-violet-700 border-violet-200'
+                    : 'bg-amber-50 text-amber-700 border-amber-200'
+                }`}
+              >
+                {activeClient.vatStatus === 'vat-registered' ? 'VAT Registered (12%)' : 'Non-VAT (3%)'}
+              </span>
+
+              {activeClient.isWithholdingAgent && (
+                <span className="px-2.5 py-1 rounded-md border bg-emerald-50 text-emerald-700 border-emerald-200 font-medium">
+                  Withholding Agent
+                </span>
+              )}
+
+              <span className="text-slate-500 font-mono hidden sm:inline">
+                {activeClient.rdo}
+              </span>
+            </div>
+          )}
         </div>
       </div>
     </header>

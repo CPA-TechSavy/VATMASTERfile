@@ -70,6 +70,10 @@ interface BranchVatScheduleProps {
   onSync2551Q?: (data: {
     grossSales: number;
     exemptSales: number;
+    vatableSales?: number;
+    salesToGovernment?: number;
+    zeroRatedSales?: number;
+    vatExemptSales?: number;
   }) => void;
   onBranchScheduleChange?: (state: {
     branches: ClientBranchSchedule[];
@@ -458,7 +462,8 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
       monthLabel,
       client,
       branchName,
-      includeSampleRow: true,
+      includeSampleRow: false,
+      formType,
     });
   };
 
@@ -1144,13 +1149,15 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
       onSync2551Q({
         grossSales: totalGrossSales,
         exemptSales: displayTotals.salesColF,
+        vatableSales: displayVatableSales,
+        salesToGovernment: displayGovSales,
+        zeroRatedSales: displayZeroRatedSales,
+        vatExemptSales: displayVatExemptSales,
       });
       setSyncSuccessMsg(
         `Successfully synced from all Data to BIR Form 2551Q! Gross Sales: ${formatPHP(
           totalGrossSales
-        )} | Exempt: ${formatPHP(displayTotals.salesColF)} | Taxable (3% Base): ${formatPHP(
-          displayTotals.salesColH
-        )}.`
+        )} | Vatable/Taxable: ${formatPHP(displayVatableSales)} | Govt: ${formatPHP(displayGovSales)} | Zero-Rated: ${formatPHP(displayZeroRatedSales)} | Exempt: ${formatPHP(displayVatExemptSales)}.`
       );
     }
     setTimeout(() => setSyncSuccessMsg(null), 4500);
@@ -2895,9 +2902,6 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
                         {quarter} {year}
                       </span>
                     </h4>
-                    <p className="text-[11px] text-slate-500">
-                      Aggregated branch sales ready to transfer directly to Form 2551Q
-                    </p>
                   </div>
                 </div>
 

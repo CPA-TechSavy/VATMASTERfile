@@ -442,24 +442,55 @@ export interface Result2551Q {
   totalTaxCredits: number;
   netPercentageTaxPayable: number;
   isOverpayment: boolean;
+  vatableSales: number;
+  salesToGovernment: number;
+  zeroRatedSales: number;
+  vatExemptSales: number;
 }
 
 export function calculate2551Q(data: Data2551Q): Result2551Q {
-  const taxableSales = Math.max(0, data.grossSalesCurrentQuarter - data.exemptSales);
+  const hasBreakdown =
+    data.vatableSales !== undefined ||
+    data.salesToGovernment !== undefined ||
+    data.zeroRatedSales !== undefined ||
+    data.vatExemptSales !== undefined;
+
+  const vatableSales = data.vatableSales || 0;
+  const salesToGovernment = data.salesToGovernment || 0;
+  const zeroRatedSales = data.zeroRatedSales || 0;
+  const vatExemptSales =
+    data.vatExemptSales !== undefined ? data.vatExemptSales : (data.exemptSales || 0);
+
+  const grossSales = hasBreakdown
+    ? vatableSales + salesToGovernment + zeroRatedSales + vatExemptSales
+    : (data.grossSalesCurrentQuarter || 0);
+
+  const exemptSales = hasBreakdown
+    ? vatExemptSales + zeroRatedSales
+    : (data.exemptSales || 0);
+
+  const taxableSales = hasBreakdown
+    ? Math.max(0, vatableSales + salesToGovernment)
+    : Math.max(0, grossSales - exemptSales);
+
   const taxRate = data.taxRatePercent / 100;
   const taxDue = taxableSales * taxRate;
   const totalTaxCredits = data.cwt2307Credits + data.priorQuarterTaxPaid;
   const netPercentageTaxPayable = taxDue - totalTaxCredits;
 
   return {
-    grossSales: data.grossSalesCurrentQuarter,
-    exemptSales: data.exemptSales,
+    grossSales,
+    exemptSales,
     taxableSales,
     taxRatePercent: data.taxRatePercent,
     taxDue,
     totalTaxCredits,
     netPercentageTaxPayable,
     isOverpayment: netPercentageTaxPayable < 0,
+    vatableSales,
+    salesToGovernment,
+    zeroRatedSales,
+    vatExemptSales,
   };
 }
 

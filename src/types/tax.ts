@@ -84,6 +84,11 @@ export interface Data2551Q {
   taxRatePercent: number; // Default 3% under Tax Code
   grossSalesCurrentQuarter: number;
   exemptSales: number;
+  // Four constituent sales breakdown fields matching BIR schedule & 2550Q parity
+  vatableSales?: number;
+  salesToGovernment?: number;
+  zeroRatedSales?: number;
+  vatExemptSales?: number;
   cwt2307Credits: number; // Form 2307 Percentage Tax withheld
   priorQuarterTaxPaid: number;
 }

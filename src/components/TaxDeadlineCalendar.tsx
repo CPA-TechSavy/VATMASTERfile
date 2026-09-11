@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 
 interface TaxDeadlineCalendarProps {
-  activeClient: ClientProfile;
+  activeClient: ClientProfile | null;
   selectedYear: number;
   selectedMonth: number; // 1-12
   onSelectYear: (year: number) => void;
@@ -91,7 +91,7 @@ export const TaxDeadlineCalendar: React.FC<TaxDeadlineCalendarProps> = ({
 
   // Filtered list based on active client
   const displayedDeadlines = useMemo(() => {
-    if (!clientFilterOnly) return allMonthDeadlines;
+    if (!clientFilterOnly || !activeClient) return allMonthDeadlines;
     return allMonthDeadlines.filter((d) => isDeadlineApplicableToClient(d, activeClient));
   }, [allMonthDeadlines, clientFilterOnly, activeClient]);
 
@@ -443,23 +443,25 @@ export const TaxDeadlineCalendar: React.FC<TaxDeadlineCalendarProps> = ({
               Filing Scope:
             </span>
 
-            <button
-              id="filter-client-only-btn"
-              onClick={() => setClientFilterOnly(true)}
-              className={`px-2.5 py-1 rounded-md transition-colors border font-medium ${
-                clientFilterOnly
-                  ? 'bg-indigo-50 text-indigo-700 border-indigo-300 shadow-xs'
-                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-              }`}
-            >
-              Only for {activeClient.tradeName} ({displayedDeadlines.length} Due)
-            </button>
+            {activeClient ? (
+              <button
+                id="filter-client-only-btn"
+                onClick={() => setClientFilterOnly(true)}
+                className={`px-2.5 py-1 rounded-md transition-colors border font-medium ${
+                  clientFilterOnly
+                    ? 'bg-indigo-50 text-indigo-700 border-indigo-300 shadow-xs'
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                Only for {activeClient.tradeName} ({displayedDeadlines.length} Due)
+              </button>
+            ) : null}
 
             <button
               id="filter-all-deadlines-btn"
               onClick={() => setClientFilterOnly(false)}
               className={`px-2.5 py-1 rounded-md transition-colors border font-medium ${
-                !clientFilterOnly
+                !clientFilterOnly || !activeClient
                   ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
                   : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
               }`}
@@ -469,11 +471,13 @@ export const TaxDeadlineCalendar: React.FC<TaxDeadlineCalendarProps> = ({
           </div>
 
           {/* Active Client Context Tip */}
-          <div className="text-xs text-slate-500 flex items-center gap-2">
-            <span>Client:</span>
-            <strong className="text-slate-800">{activeClient.registeredName}</strong>
-            <span className="text-slate-400 font-mono">({activeClient.classification})</span>
-          </div>
+          {activeClient && (
+            <div className="text-xs text-slate-500 flex items-center gap-2">
+              <span>Client:</span>
+              <strong className="text-slate-800">{activeClient.registeredName}</strong>
+              <span className="text-slate-400 font-mono">({activeClient.classification})</span>
+            </div>
+          )}
         </div>
       </div>
 

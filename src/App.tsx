@@ -44,6 +44,7 @@ import {
   AlertCircle,
   Trash2,
   X,
+  Plus,
 } from 'lucide-react';
 
 type FormTab =
@@ -56,16 +57,36 @@ type FormTab =
   | '1601C'
   | '1601EQ';
 
-const STORAGE_KEY_CLIENTS = 'bir_app_clients_v1';
-const STORAGE_KEY_DATA = 'bir_app_data_v1';
+const STORAGE_KEY_CLIENTS = 'bir_app_clients_v2';
+const STORAGE_KEY_DATA = 'bir_app_data_v2';
 
 export default function App() {
-  // Clients state
+  // Clients state - initialized to clean slate (no demo clients)
   const [clients, setClients] = useState<ClientProfile[]>(() => {
+    // Purge legacy v1 demo data if present
+    try {
+      localStorage.removeItem('bir_app_clients_v1');
+      localStorage.removeItem('bir_app_data_v1_1701Q');
+      localStorage.removeItem('bir_app_data_v1_1702Q');
+      localStorage.removeItem('bir_app_data_v1_2550Q');
+      localStorage.removeItem('bir_app_data_v1_2551Q');
+      localStorage.removeItem('bir_app_data_v1_1601C');
+      localStorage.removeItem('bir_app_data_v1_1601EQ');
+      localStorage.removeItem('bir_submitted_returns');
+      ['client-1', 'client-2', 'client-3', 'client-4', 'client-5'].forEach((id) => {
+        localStorage.removeItem(`bir_branch_schedule_${id}`);
+      });
+    } catch {}
+
     const saved = localStorage.getItem(STORAGE_KEY_CLIENTS);
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter(
+            (c: any) => !['client-1', 'client-2', 'client-3', 'client-4', 'client-5'].includes(c.id)
+          );
+        }
       } catch (e) {
         console.error('Failed to parse saved clients', e);
       }
@@ -74,7 +95,20 @@ export default function App() {
   });
 
   const [activeClientId, setActiveClientId] = useState<string>(() => {
-    return clients[0]?.id || 'client-1';
+    const saved = localStorage.getItem(STORAGE_KEY_CLIENTS);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (
+          Array.isArray(parsed) &&
+          parsed[0]?.id &&
+          !['client-1', 'client-2', 'client-3', 'client-4', 'client-5'].includes(parsed[0].id)
+        ) {
+          return parsed[0].id;
+        }
+      } catch {}
+    }
+    return '';
   });
 
   // Active period - follows the real time date
@@ -152,12 +186,12 @@ export default function App() {
   }, [data1601EQMap]);
 
   // Current client
-  const activeClient = clients.find((c) => c.id === activeClientId) || clients[0];
+  const activeClient: ClientProfile | null = clients.find((c) => c.id === activeClientId) || clients[0] || null;
 
-  const isSingle = activeClient.classification === 'Single';
-  const isCorp = !isSingle;
-  const isVat = activeClient.vatStatus === 'vat-registered';
-  const isWithholding = activeClient.isWithholdingAgent;
+  const isSingle = activeClient?.classification === 'Single';
+  const isCorp = activeClient ? !isSingle : false;
+  const isVat = activeClient?.vatStatus === 'vat-registered';
+  const isWithholding = !!activeClient?.isWithholdingAgent;
 
   // Track submission statuses for BIR returns (key: clientId_year_period_form)
   const [submittedReturns, setSubmittedReturns] = useState<Record<string, boolean>>(() => {
@@ -182,6 +216,7 @@ export default function App() {
 
   // Tab lock logic based on Filing Schedule & Summary requirements
   const getTabLockInfo = (tab: FormTab): { locked: boolean; reason?: string } => {
+    if (!activeClient) return { locked: false };
     if (tab === '1701Q' && !isSingle) {
       return {
         locked: true,
@@ -232,11 +267,30 @@ export default function App() {
     setActiveTab(tab);
   };
 
-  // Client data fallbacks - keyed by activeClient.id and activeClient.id_year_quarter to persist per quarter
-  const currentQuarterKey = `${activeClient.id}_${year}_${quarter}`;
-  const currentMonthKey = `${activeClient.id}_${year}_M${month}`;
+  // Ensure active tab stays consistent with active client status
+  useEffect(() => {
+    if (!activeClient) return;
+    const lock = getTabLockInfo(activeTab);
+    if (lock.locked) {
+      if (activeTab === '2551Q' && isVat) {
+        setActiveTab('2550Q');
+      } else if (activeTab === '2550Q' && !isVat) {
+        setActiveTab('2551Q');
+      } else if (activeTab === '1701Q' && !isSingle) {
+        setActiveTab('1702Q');
+      } else if (activeTab === '1702Q' && isSingle) {
+        setActiveTab('1701Q');
+      } else if ((activeTab === '1601C' || activeTab === '1601EQ') && !isWithholding) {
+        setActiveTab('summary');
+      }
+    }
+  }, [activeClientId, isVat, isSingle, isWithholding, activeTab]);
 
-  const current1701Q = data1701QMap[currentQuarterKey] || data1701QMap[activeClient.id] || {
+  // Client data fallbacks - keyed by activeClient.id and activeClient.id_year_quarter to persist per quarter
+  const currentQuarterKey = activeClient ? `${activeClient.id}_${year}_${quarter}` : `default_${year}_${quarter}`;
+  const currentMonthKey = activeClient ? `${activeClient.id}_${year}_M${month}` : `default_${year}_M${month}`;
+
+  const current1701Q = (activeClient && (data1701QMap[currentQuarterKey] || data1701QMap[activeClient.id])) || {
     taxRegime: 'graduated',
     taxpayerType: 'pure_business',
     deductionMethod: 'osd',
@@ -251,7 +305,7 @@ export default function App() {
     otherTaxCredits: 0,
   };
 
-  const current1702Q = data1702QMap[currentQuarterKey] || data1702QMap[activeClient.id] || {
+  const current1702Q = (activeClient && (data1702QMap[currentQuarterKey] || data1702QMap[activeClient.id])) || {
     rateOption: 'regular_25',
     isMCOptional: true,
     grossSales: 0,
@@ -264,7 +318,7 @@ export default function App() {
     otherTaxCredits: 0,
   };
 
-  const current2550Q = data2550QMap[currentQuarterKey] || data2550QMap[activeClient.id] || {
+  const current2550Q = (activeClient && (data2550QMap[currentQuarterKey] || data2550QMap[activeClient.id])) || {
     vatableSales: 0,
     salesToGovernment: 0,
     zeroRatedSales: 0,
@@ -279,7 +333,7 @@ export default function App() {
     priorPaymentsThisQuarter: 0,
   };
 
-  const current2551Q = data2551QMap[currentQuarterKey] || data2551QMap[activeClient.id] || {
+  const current2551Q = (activeClient && (data2551QMap[currentQuarterKey] || data2551QMap[activeClient.id])) || {
     atcCode: 'PT010',
     taxRatePercent: 3,
     grossSalesCurrentQuarter: 0,
@@ -288,7 +342,7 @@ export default function App() {
     priorQuarterTaxPaid: 0,
   };
 
-  const current1601C = data1601CMap[currentMonthKey] || data1601CMap[activeClient.id] || {
+  const current1601C = (activeClient && (data1601CMap[currentMonthKey] || data1601CMap[activeClient.id])) || {
     totalGrossCompensation: 0,
     minimumWageEarners: 0,
     statutoryContributions: 0,
@@ -298,7 +352,7 @@ export default function App() {
     taxRemittedPreviously: 0,
   };
 
-  const current1601EQ = data1601EQMap[currentQuarterKey] || data1601EQMap[activeClient.id] || {
+  const current1601EQ = (activeClient && (data1601EQMap[currentQuarterKey] || data1601EQMap[activeClient.id])) || {
     isMonthly: true,
     priorMonthTaxRemitted: 0,
     overpaymentPreviousPeriod: 0,
@@ -321,6 +375,16 @@ export default function App() {
       setClients([...clients, saved]);
       setActiveClientId(saved.id);
     }
+
+    const cIsSingle = saved.classification === 'Single';
+    const cIsVat = saved.vatStatus === 'vat-registered';
+    const cIsWithholding = saved.isWithholdingAgent;
+
+    if (activeTab === '1701Q' && !cIsSingle) setActiveTab('1702Q');
+    else if (activeTab === '1702Q' && cIsSingle) setActiveTab('1701Q');
+    else if (activeTab === '2550Q' && !cIsVat) setActiveTab('2551Q');
+    else if (activeTab === '2551Q' && cIsVat) setActiveTab('2550Q');
+    else if ((activeTab === '1601C' || activeTab === '1601EQ') && !cIsWithholding) setActiveTab('summary');
   };
 
   const handleOpenAddClient = () => {
@@ -329,28 +393,23 @@ export default function App() {
   };
 
   const handleOpenEditClient = () => {
+    if (!activeClient) return;
     setClientToEdit(activeClient);
     setIsClientModalOpen(true);
   };
 
   const handleDeleteClient = (clientIdToDelete?: string) => {
     const idToDelete = clientIdToDelete || activeClientId;
-    if (clients.length <= 1) {
-      setDeleteClientError('At least one client profile is required. You cannot delete the only client in the workspace.');
-      return;
-    }
+    if (!idToDelete) return;
     const target = clients.find((c) => c.id === idToDelete) || activeClient;
-    setClientToDelete(target);
+    if (target) {
+      setClientToDelete(target);
+    }
   };
 
   const handleConfirmDeleteClient = () => {
     if (!clientToDelete) return;
     const idToDelete = clientToDelete.id;
-    if (clients.length <= 1) {
-      setClientToDelete(null);
-      return;
-    }
-
     const remainingClients = clients.filter((c) => c.id !== idToDelete);
     setClients(remainingClients);
 
@@ -379,22 +438,22 @@ export default function App() {
     delete next1601EQ[idToDelete];
     setData1601EQMap(next1601EQ);
 
-    if (activeClientId === idToDelete && remainingClients.length > 0) {
-      setActiveClientId(remainingClients[0].id);
+    if (activeClientId === idToDelete) {
+      setActiveClientId(remainingClients[0]?.id || '');
     }
     setClientToDelete(null);
   };
 
   const handleResetData = () => {
-    if (window.confirm('Reset all client calculations and restore defaults?')) {
-      setClients(DEFAULT_CLIENTS);
-      setActiveClientId(DEFAULT_CLIENTS[0].id);
-      setData1701QMap(INITIAL_DATA_1701Q);
-      setData1702QMap(INITIAL_DATA_1702Q);
-      setData2550QMap(INITIAL_DATA_2550Q);
-      setData2551QMap(INITIAL_DATA_2551Q);
-      setData1601CMap(INITIAL_DATA_1601C);
-      setData1601EQMap(INITIAL_DATA_1601EQ);
+    if (window.confirm('Reset all client calculations and restore a clean slate?')) {
+      setClients([]);
+      setActiveClientId('');
+      setData1701QMap({});
+      setData1702QMap({});
+      setData2550QMap({});
+      setData2551QMap({});
+      setData1601CMap({});
+      setData1601EQMap({});
       localStorage.clear();
     }
   };
@@ -720,129 +779,144 @@ export default function App() {
         )}
 
         {/* Tab View Contents */}
-        {activeTab === 'summary' && (
-          <FilingSummaryView
-            client={activeClient}
-            quarter={quarter}
-            month={month}
-            year={year}
-            data1701Q={current1701Q}
-            data1702Q={current1702Q}
-            data2550Q={current2550Q}
-            data2551Q={current2551Q}
-            data1601C={current1601C}
-            data1601EQ={current1601EQ}
-            onOpenCalendar={() => setActiveTab('calendar')}
-            onNavigateToTab={(tab) => handleSelectTab(tab)}
-            submittedStatusMap={submittedReturns}
-            onToggleSubmission={handleToggleSubmission}
-          />
-        )}
+        {!activeClient && activeTab !== 'calendar' ? (
+          <div className="flex items-center justify-center py-24">
+            <button
+              id="clean-slate-add-client-btn"
+              onClick={handleOpenAddClient}
+              className="flex items-center justify-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-base font-semibold rounded-xl shadow-xs transition-colors cursor-pointer"
+            >
+              <Plus className="w-5 h-5" />
+              <span>Add First Client</span>
+            </button>
+          </div>
+        ) : (
+          <>
+            {activeTab === 'summary' && activeClient && (
+              <FilingSummaryView
+                client={activeClient}
+                quarter={quarter}
+                month={month}
+                year={year}
+                data1701Q={current1701Q}
+                data1702Q={current1702Q}
+                data2550Q={current2550Q}
+                data2551Q={current2551Q}
+                data1601C={current1601C}
+                data1601EQ={current1601EQ}
+                onOpenCalendar={() => setActiveTab('calendar')}
+                onNavigateToTab={(tab) => handleSelectTab(tab)}
+                submittedStatusMap={submittedReturns}
+                onToggleSubmission={handleToggleSubmission}
+              />
+            )}
 
-        {activeTab === 'calendar' && (
-          <TaxDeadlineCalendar
-            activeClient={activeClient}
-            selectedYear={year}
-            selectedMonth={month}
-            onSelectYear={setYear}
-            onSelectMonth={setMonth}
-            onNavigateToForm={(tab) => handleSelectTab(tab)}
-          />
-        )}
+            {activeTab === 'calendar' && (
+              <TaxDeadlineCalendar
+                activeClient={activeClient}
+                selectedYear={year}
+                selectedMonth={month}
+                onSelectYear={setYear}
+                onSelectMonth={setMonth}
+                onNavigateToForm={(tab) => handleSelectTab(tab)}
+              />
+            )}
 
-        {activeTab === '1701Q' && (
-          <Form1701QView
-            client={activeClient}
-            quarter={quarter}
-            year={year}
-            data={current1701Q}
-            onChange={(updated) =>
-              setData1701QMap((prev) => ({
-                ...prev,
-                [currentQuarterKey]: updated,
-                [activeClient.id]: updated,
-              }))
-            }
-          />
-        )}
+            {activeTab === '1701Q' && activeClient && (
+              <Form1701QView
+                client={activeClient}
+                quarter={quarter}
+                year={year}
+                data={current1701Q}
+                onChange={(updated) =>
+                  setData1701QMap((prev) => ({
+                    ...prev,
+                    [currentQuarterKey]: updated,
+                    [activeClient.id]: updated,
+                  }))
+                }
+              />
+            )}
 
-        {activeTab === '1702Q' && (
-          <Form1702QView
-            client={activeClient}
-            quarter={quarter}
-            year={year}
-            data={current1702Q}
-            onChange={(updated) =>
-              setData1702QMap((prev) => ({
-                ...prev,
-                [currentQuarterKey]: updated,
-                [activeClient.id]: updated,
-              }))
-            }
-          />
-        )}
+            {activeTab === '1702Q' && activeClient && (
+              <Form1702QView
+                client={activeClient}
+                quarter={quarter}
+                year={year}
+                data={current1702Q}
+                onChange={(updated) =>
+                  setData1702QMap((prev) => ({
+                    ...prev,
+                    [currentQuarterKey]: updated,
+                    [activeClient.id]: updated,
+                  }))
+                }
+              />
+            )}
 
-        {activeTab === '2550Q' && (
-          <Form2550QView
-            client={activeClient}
-            quarter={quarter}
-            year={year}
-            data={current2550Q}
-            onChange={(updated) =>
-              setData2550QMap((prev) => ({
-                ...prev,
-                [currentQuarterKey]: updated,
-                [activeClient.id]: updated,
-              }))
-            }
-          />
-        )}
+            {activeTab === '2550Q' && activeClient && (
+              <Form2550QView
+                client={activeClient}
+                quarter={quarter}
+                year={year}
+                data={current2550Q}
+                onChange={(updated) =>
+                  setData2550QMap((prev) => ({
+                    ...prev,
+                    [currentQuarterKey]: updated,
+                    [activeClient.id]: updated,
+                  }))
+                }
+              />
+            )}
 
-        {activeTab === '2551Q' && (
-          <Form2551QView
-            client={activeClient}
-            quarter={quarter}
-            year={year}
-            data={current2551Q}
-            onChange={(updated) =>
-              setData2551QMap((prev) => ({
-                ...prev,
-                [currentQuarterKey]: updated,
-                [activeClient.id]: updated,
-              }))
-            }
-          />
-        )}
+            {activeTab === '2551Q' && activeClient && (
+              <Form2551QView
+                client={activeClient}
+                quarter={quarter}
+                year={year}
+                data={current2551Q}
+                onChange={(updated) =>
+                  setData2551QMap((prev) => ({
+                    ...prev,
+                    [currentQuarterKey]: updated,
+                    [activeClient.id]: updated,
+                  }))
+                }
+              />
+            )}
 
-        {activeTab === '1601C' && (
-          <Form1601CView
-            client={activeClient}
-            month={month}
-            year={year}
-            data={current1601C}
-            onChange={(updated) =>
-              setData1601CMap((prev) => ({
-                ...prev,
-                [currentMonthKey]: updated,
-                [activeClient.id]: updated,
-              }))
-            }
-          />
-        )}
+            {activeTab === '1601C' && activeClient && (
+              <Form1601CView
+                client={activeClient}
+                month={month}
+                year={year}
+                data={current1601C}
+                onChange={(updated) =>
+                  setData1601CMap((prev) => ({
+                    ...prev,
+                    [currentMonthKey]: updated,
+                    [activeClient.id]: updated,
+                  }))
+                }
+              />
+            )}
 
-        {activeTab === '1601EQ' && (
-          <Form1601EQView
-            client={activeClient}
-            periodLabel={current1601EQ.isMonthly ? `Month ${month}, ${year}` : `${quarter} ${year}`}
-            data={current1601EQ}
-            onChange={(updated) =>
-              setData1601EQMap((prev) => ({
-                ...prev,
-                [currentQuarterKey]: updated,
-                [activeClient.id]: updated,
-              }))
-            }
-          />
+            {activeTab === '1601EQ' && activeClient && (
+              <Form1601EQView
+                client={activeClient}
+                periodLabel={current1601EQ.isMonthly ? `Month ${month}, ${year}` : `${quarter} ${year}`}
+                data={current1601EQ}
+                onChange={(updated) =>
+                  setData1601EQMap((prev) => ({
+                    ...prev,
+                    [currentQuarterKey]: updated,
+                    [activeClient.id]: updated,
+                  }))
+                }
+              />
+            )}
+          </>
         )}
       </main>
 
@@ -850,17 +924,21 @@ export default function App() {
       <footer className="bg-white border-t border-slate-200 mt-auto py-3 px-4 sm:px-6 print:hidden">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-500">
           <div>
-            Client: <strong className="text-slate-800">{activeClient.tradeName}</strong> ({activeClient.tin}) • Tax Period: {quarter} {year}
+            {activeClient ? (
+              <>Client: <strong className="text-slate-800">{activeClient.tradeName}</strong> ({activeClient.tin}) • Tax Period: {quarter} {year}</>
+            ) : (
+              <>Client: <span className="text-slate-500 font-medium">None (Clean Slate)</span> • Tax Period: {quarter} {year}</>
+            )}
           </div>
           <div className="flex items-center gap-4">
             <button
               id="reset-defaults-btn"
               onClick={handleResetData}
-              className="flex items-center gap-1 text-slate-400 hover:text-slate-700 transition-colors"
-              title="Reset all clients to default sample data"
+              className="flex items-center gap-1 text-slate-400 hover:text-slate-700 transition-colors cursor-pointer"
+              title="Reset all clients to a clean slate"
             >
               <RotateCcw className="w-3 h-3" />
-              <span>Reset Samples</span>
+              <span>Reset Clean Slate</span>
             </button>
             <span>NIRC • Ease of Paying Taxes (eOPT) Act (RA 11976)</span>
           </div>

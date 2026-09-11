@@ -52,19 +52,23 @@ export async function downloadBirSlspExcelTemplate({
   client,
   branchName,
   includeSampleRow = false,
+  formType,
 }: {
   type: 'Sales' | 'Purchases';
   quarter: Quarter;
   monthLabel: '1st Month' | '2nd Month' | '3rd Month' | 'Consolidated';
-  client: ClientProfile;
+  client?: ClientProfile | null;
   branchName?: string;
   includeSampleRow?: boolean;
+  formType?: '2550Q' | '2551Q';
 }) {
+  const is2551Q = formType === '2551Q' || (!formType && client?.vatStatus === 'non-vat');
   const isPurchases = type === 'Purchases';
-  const companyName = (client.registeredName || client.tradeName || 'Taxpayer').trim();
+  const companyName = client ? (client.registeredName || client.tradeName || 'Taxpayer').trim() : 'Taxpayer';
   const cleanClient = companyName.replace(/[^a-zA-Z0-9_-]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
   const cleanBranch = branchName ? `_${branchName.replace(/[^a-zA-Z0-9_-]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '')}` : '';
-  const fileName = `BIR_${type}_${quarter}_${monthLabel.replace(/\s+/g, '_')}_${cleanClient}${cleanBranch}.xlsx`;
+  const filePrefix = is2551Q ? `BIR_2551Q_${type}_` : `BIR_${type}_`;
+  const fileName = `${filePrefix}${quarter}_${monthLabel.replace(/\s+/g, '_')}_${cleanClient}${cleanBranch}.xlsx`;
   const sheetName = `${type}_${quarter}_${monthLabel.replace(/\s+/g, '')}`.slice(0, 31);
 
   try {
@@ -86,19 +90,18 @@ export async function downloadBirSlspExcelTemplate({
       ws.getCell('A2').font = { bold: true, size: 10, name: 'Calibri' };
     }
 
-    ws.getCell('A6').value = `TIN: ${client.tin}`;
+    ws.getCell('A6').value = `TIN: ${client?.tin || '000-000-000-000'}`;
     ws.getCell('A6').font = { bold: true, size: 11, name: 'Calibri' };
 
-    ws.getCell('A7').value = `OWNER'S NAME: ${client.registeredName || client.tradeName}`;
+    ws.getCell('A7').value = `OWNER'S NAME: ${client ? (client.registeredName || client.tradeName) : 'Registered Taxpayer'}`;
     ws.getCell('A7').font = { bold: true, size: 11, name: 'Calibri' };
 
-    ws.getCell('A8').value = `OWNER'S TRADE NAME: ${client.tradeName || client.registeredName}`;
+    ws.getCell('A8').value = `OWNER'S TRADE NAME: ${client ? (client.tradeName || client.registeredName) : 'Trade Name'}`;
     ws.getCell('A8').font = { bold: true, size: 11, name: 'Calibri' };
 
     // 2. Column Headers
-    // A11:A12 through M11:M12: Merge cell, wrap text, align center
-    // B11:B12: transferred from B11:B13 to B11:B12
-    // Bold the entire row of 11 and 12
+    // A11:A12 through K11:K12 (for 2551Q) or M11:M12 (for 2550Q)
+    // In 2551Q, Column L and M are fully removed since there is no Output Tax under Percentage Tax
     const headers: { col: string; text: string }[] = [
       { col: 'A', text: 'TAXABLE MONTH' },
       { col: 'B', text: 'TAXPAYER IDENTIFICATION NUMBER' },
@@ -111,9 +114,14 @@ export async function downloadBirSlspExcelTemplate({
       { col: 'I', text: isPurchases ? 'AMOUNT OF PURCHASE OF SERVICES' : 'AMOUNT OF SALE OF SERVICES' },
       { col: 'J', text: isPurchases ? 'AMOUNT OF PURCHASE OF CAPITAL GOODS' : 'AMOUNT OF SALE OF CAPITAL GOODS' },
       { col: 'K', text: isPurchases ? 'AMOUNT OF PURCHASE OF GOODS OTHER THAN CAPITAL GOODS' : 'AMOUNT OF SALE OF GOODS OTHER THAN CAPITAL GOODS' },
-      { col: 'L', text: isPurchases ? 'AMOUNT OF INPUT TAX' : 'AMOUNT OF OUTPUT TAX' },
-      { col: 'M', text: isPurchases ? 'AMOUNT OF GROSS TAXABLE PURCHASE' : 'AMOUNT OF GROSS TAXABLE SALES' },
     ];
+
+    if (!is2551Q) {
+      headers.push(
+        { col: 'L', text: isPurchases ? 'AMOUNT OF INPUT TAX' : 'AMOUNT OF OUTPUT TAX' },
+        { col: 'M', text: isPurchases ? 'AMOUNT OF GROSS TAXABLE PURCHASE' : 'AMOUNT OF GROSS TAXABLE SALES' }
+      );
+    }
 
     // Set row height and bold entire row 11 and 12
     const row11 = ws.getRow(11);
@@ -124,7 +132,6 @@ export async function downloadBirSlspExcelTemplate({
     row12.font = { bold: true, size: 10, name: 'Calibri' };
 
     headers.forEach(({ col, text }) => {
-      // Merge cell range: e.g., A11:A12, B11:B12, C11:C12, ... M11:M12
       ws.mergeCells(`${col}11:${col}12`);
 
       const topCell = ws.getCell(`${col}11`);
@@ -146,7 +153,12 @@ export async function downloadBirSlspExcelTemplate({
     });
 
     // 3. Field Column Identifiers (Row 14)
-    const identifiers = ['(1)', '(2)', '(3)', '(5)', '(6)', '(7)', '(8)', '(9)', '(10)', '(11)', '(12)', '(13)', '(14)'];
+    // For 2551Q: (1) to (12) matching columns A through K
+    // For 2550Q: (1) to (14) matching columns A through M
+    const identifiers = is2551Q
+      ? ['(1)', '(2)', '(3)', '(5)', '(6)', '(7)', '(8)', '(9)', '(10)', '(11)', '(12)']
+      : ['(1)', '(2)', '(3)', '(5)', '(6)', '(7)', '(8)', '(9)', '(10)', '(11)', '(12)', '(13)', '(14)'];
+
     const row14 = ws.getRow(14);
     row14.height = 20;
     headers.forEach(({ col }, idx) => {
@@ -168,8 +180,11 @@ export async function downloadBirSlspExcelTemplate({
     cellA1999.value = 'Grand Total :';
     cellA1999.font = { bold: true, size: 10, name: 'Calibri' };
 
-    // Cells E1999:M1999 – Grand total sum fields
-    const numCols = ['E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M'];
+    // Grand total sum fields (E to K for 2551Q, E to M for 2550Q)
+    const numCols = is2551Q
+      ? ['E', 'F', 'G', 'H', 'I', 'J', 'K']
+      : ['E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M'];
+
     numCols.forEach((col) => {
       const cell = ws.getCell(`${col}1999`);
       cell.value = { formula: `SUM(${col}15:${col}1998)`, result: 0 };
@@ -183,7 +198,7 @@ export async function downloadBirSlspExcelTemplate({
     cellA2001.font = { bold: true, size: 10, name: 'Calibri' };
 
     // Column widths for optimal readability
-    ws.columns = [
+    const baseColumns = [
       { key: 'A', width: 18 }, // A: TAXABLE MONTH
       { key: 'B', width: 26 }, // B: TIN
       { key: 'C', width: 34 }, // C: REGISTERED NAME
@@ -195,9 +210,16 @@ export async function downloadBirSlspExcelTemplate({
       { key: 'I', width: 22 }, // I: SERVICES
       { key: 'J', width: 22 }, // J: CAPITAL GOODS
       { key: 'K', width: 26 }, // K: GOODS OTHER THAN CAPITAL
-      { key: 'L', width: 20 }, // L: TAX
-      { key: 'M', width: 24 }, // M: GROSS TAXABLE
     ];
+
+    if (!is2551Q) {
+      baseColumns.push(
+        { key: 'L', width: 20 }, // L: TAX
+        { key: 'M', width: 24 }  // M: GROSS TAXABLE
+      );
+    }
+
+    ws.columns = baseColumns;
 
     const buffer = await wb.xlsx.writeBuffer();
     const blob = new Blob([buffer], {
@@ -228,9 +250,9 @@ export async function downloadBirSlspExcelTemplate({
 
     setCell(0, 0, `${type} - ${quarter} - ${monthLabel}`);
     if (branchName) setCell(1, 0, `BRANCH / LINE OF BUSINESS: ${branchName}`);
-    setCell(5, 0, `TIN: ${client.tin}`);
-    setCell(6, 0, `OWNER'S NAME: ${client.registeredName || client.tradeName}`);
-    setCell(7, 0, `OWNER'S TRADE NAME: ${client.tradeName || client.registeredName}`);
+    setCell(5, 0, `TIN: ${client?.tin || '000-000-000-000'}`);
+    setCell(6, 0, `OWNER'S NAME: ${client ? (client.registeredName || client.tradeName) : 'Registered Taxpayer'}`);
+    setCell(7, 0, `OWNER'S TRADE NAME: ${client ? (client.tradeName || client.registeredName) : 'Trade Name'}`);
 
     const headerTexts = [
       'TAXABLE MONTH',
@@ -244,8 +266,12 @@ export async function downloadBirSlspExcelTemplate({
       isPurchases ? 'AMOUNT OF PURCHASE OF SERVICES' : 'AMOUNT OF SALE OF SERVICES',
       isPurchases ? 'AMOUNT OF PURCHASE OF CAPITAL GOODS' : 'AMOUNT OF SALE OF CAPITAL GOODS',
       isPurchases ? 'AMOUNT OF PURCHASE OF GOODS OTHER THAN CAPITAL GOODS' : 'AMOUNT OF SALE OF GOODS OTHER THAN CAPITAL GOODS',
-      isPurchases ? 'AMOUNT OF INPUT TAX' : 'AMOUNT OF OUTPUT TAX',
-      isPurchases ? 'AMOUNT OF GROSS TAXABLE PURCHASE' : 'AMOUNT OF GROSS TAXABLE SALES',
+      ...(!is2551Q
+        ? [
+            isPurchases ? 'AMOUNT OF INPUT TAX' : 'AMOUNT OF OUTPUT TAX',
+            isPurchases ? 'AMOUNT OF GROSS TAXABLE PURCHASE' : 'AMOUNT OF GROSS TAXABLE SALES',
+          ]
+        : []),
     ];
 
     headerTexts.forEach((text, c) => {
@@ -253,7 +279,9 @@ export async function downloadBirSlspExcelTemplate({
       setCell(11, c, text);
     });
 
-    const identifiers = ['(1)', '(2)', '(3)', '(5)', '(6)', '(7)', '(8)', '(9)', '(10)', '(11)', '(12)', '(13)', '(14)'];
+    const identifiers = is2551Q
+      ? ['(1)', '(2)', '(3)', '(5)', '(6)', '(7)', '(8)', '(9)', '(10)', '(11)', '(12)']
+      : ['(1)', '(2)', '(3)', '(5)', '(6)', '(7)', '(8)', '(9)', '(10)', '(11)', '(12)', '(13)', '(14)'];
     identifiers.forEach((id, c) => setCell(13, c, id));
 
     if (includeSampleRow) {
@@ -261,12 +289,16 @@ export async function downloadBirSlspExcelTemplate({
     }
 
     setCell(1998, 0, 'Grand Total :');
-    ['E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M'].forEach((letter, i) => {
+    const numCols = is2551Q
+      ? ['E', 'F', 'G', 'H', 'I', 'J', 'K']
+      : ['E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M'];
+
+    numCols.forEach((letter, i) => {
       setCell(1998, 4 + i, 0, `SUM(${letter}15:${letter}1998)`);
     });
     setCell(2000, 0, 'END OF REPORT');
 
-    ws['!ref'] = 'A1:M2001';
+    ws['!ref'] = is2551Q ? 'A1:K2001' : 'A1:M2001';
     ws['!merges'] = [
       { s: { r: 10, c: 0 }, e: { r: 11, c: 0 } }, // A11:A12
       { s: { r: 10, c: 1 }, e: { r: 11, c: 1 } }, // B11:B12
@@ -279,25 +311,43 @@ export async function downloadBirSlspExcelTemplate({
       { s: { r: 10, c: 8 }, e: { r: 11, c: 8 } }, // I11:I12
       { s: { r: 10, c: 9 }, e: { r: 11, c: 9 } }, // J11:J12
       { s: { r: 10, c: 10 }, e: { r: 11, c: 10 } }, // K11:K12
-      { s: { r: 10, c: 11 }, e: { r: 11, c: 11 } }, // L11:L12
-      { s: { r: 10, c: 12 }, e: { r: 11, c: 12 } }, // M11:M12
+      ...(!is2551Q
+        ? [
+            { s: { r: 10, c: 11 }, e: { r: 11, c: 11 } }, // L11:L12
+            { s: { r: 10, c: 12 }, e: { r: 11, c: 12 } }, // M11:M12
+          ]
+        : []),
     ];
 
-    ws['!cols'] = [
-      { wch: 18 },
-      { wch: 26 },
-      { wch: 34 },
-      { wch: 38 },
-      { wch: 22 },
-      { wch: 20 },
-      { wch: 20 },
-      { wch: 22 },
-      { wch: 22 },
-      { wch: 22 },
-      { wch: 26 },
-      { wch: 20 },
-      { wch: 24 },
-    ];
+    ws['!cols'] = is2551Q
+      ? [
+          { wch: 18 },
+          { wch: 26 },
+          { wch: 34 },
+          { wch: 38 },
+          { wch: 22 },
+          { wch: 20 },
+          { wch: 20 },
+          { wch: 22 },
+          { wch: 22 },
+          { wch: 22 },
+          { wch: 26 },
+        ]
+      : [
+          { wch: 18 },
+          { wch: 26 },
+          { wch: 34 },
+          { wch: 38 },
+          { wch: 22 },
+          { wch: 20 },
+          { wch: 20 },
+          { wch: 22 },
+          { wch: 22 },
+          { wch: 22 },
+          { wch: 26 },
+          { wch: 20 },
+          { wch: 24 },
+        ];
 
     const wbFallback = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wbFallback, ws, sheetName);
