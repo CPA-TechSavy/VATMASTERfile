@@ -31,7 +31,7 @@ interface TaxDeadlineCalendarProps {
   selectedMonth: number; // 1-12
   onSelectYear: (year: number) => void;
   onSelectMonth: (month: number) => void;
-  onNavigateToForm?: (tab: '1701Q' | '1702Q' | '2550Q' | '2551Q' | '1601C' | '1601EQ') => void;
+  onNavigateToForm?: (tab: '1701Q' | '1702Q' | '2550Q' | '2551Q' | '1601C' | '1601EQ' | '1701Annual' | '1702Annual') => void;
 }
 
 const MONTH_NAMES = [

@@ -337,9 +337,82 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
   }, [onBranchScheduleChange]);
 
   const lastEmittedScheduleStateRef = useRef<string>('');
+  // Keep track of the currently loaded storage key to avoid saving old quarter data into a new quarter key
+  const loadedStorageKeyRef = useRef<string>(storageKey);
+
+  // Reload branches and uploaded files when switching quarter, year, or client
+  useEffect(() => {
+    if (loadedStorageKeyRef.current === storageKey) return;
+
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        setBranches(
+          parsed.branches && parsed.branches.length > 0
+            ? parsed.branches
+            : [
+                {
+                  id: 'branch-main',
+                  name: 'Head Office / Main Branch',
+                  salesFiles: {},
+                  purchasesFiles: {},
+                },
+              ]
+        );
+        setPurchasesMode(parsed.purchasesMode || 'consolidated');
+        setConsolidatedPurchasesFile(parsed.consolidatedPurchasesFile);
+        setHasBranches(parsed.hasBranches || false);
+        setGovernmentSalesKeys(
+          Array.isArray(parsed.governmentSalesKeys)
+            ? parsed.governmentSalesKeys
+            : parsed.salesChecklist?.governmentSalesKeys || []
+        );
+        setHas2307SalesKeys(
+          Array.isArray(parsed.has2307SalesKeys)
+            ? parsed.has2307SalesKeys
+            : parsed.salesChecklist?.has2307SalesKeys || []
+        );
+        setDeferralState(
+          parsed.deferralState || {
+            deferredCustomerKeys: [],
+            manualTaxableSales: 0,
+            manualVatDue: 0,
+          }
+        );
+      } else {
+        // Clean slate for the new quarter
+        setBranches([
+          {
+            id: 'branch-main',
+            name: 'Head Office / Main Branch',
+            salesFiles: {},
+            purchasesFiles: {},
+          },
+        ]);
+        setPurchasesMode('consolidated');
+        setConsolidatedPurchasesFile(undefined);
+        setHasBranches(false);
+        setGovernmentSalesKeys([]);
+        setHas2307SalesKeys([]);
+        setDeferralState({
+          deferredCustomerKeys: [],
+          manualTaxableSales: 0,
+          manualVatDue: 0,
+        });
+      }
+    } catch (e) {
+      console.error('Failed to reload branch schedule on quarter switch', e);
+    } finally {
+      loadedStorageKeyRef.current = storageKey;
+    }
+  }, [storageKey]);
 
   // Save to localStorage whenever branches, purchasesMode, consolidatedPurchasesFile, hasBranches, deferralState, or checklist tags change
   useEffect(() => {
+    // Only persist if the current state belongs to the loaded storage key (prevents overwriting on quarter switch)
+    if (loadedStorageKeyRef.current !== storageKey) return;
+
     try {
       const payload = {
         branches,

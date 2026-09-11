@@ -27,7 +27,7 @@ export interface TaxDeadlineItem {
   submissionChannel: string; // e.g. "eFPS / eBIRForms Offline"
   legalBasis: string;
   description: string;
-  targetAppTab?: '1701Q' | '1702Q' | '2550Q' | '2551Q' | '1601C' | '1601EQ' | 'summary';
+  targetAppTab?: '1701Q' | '1702Q' | '2550Q' | '2551Q' | '1601C' | '1601EQ' | '1701Annual' | '1702Annual' | 'summary';
 }
 
 export interface CalendarDayCell {

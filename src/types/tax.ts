@@ -129,3 +129,56 @@ export interface PenaltiesData {
   includeInterest: boolean; // 12% per annum
   includeCompromise: boolean; // BIR compromise schedule
 }
+
+// Itemized expense account line item (for Cost of Goods Sold and Itemized Deductions)
+export interface ExpenseAccountItem {
+  id: string;
+  accountName: string;
+  category?: string;
+  amount: number;
+  notes?: string;
+}
+
+// BIR Form 1701 / 1701A: Annual Income Tax Return for Individuals / Sole Proprietorship
+export interface Data1701Annual {
+  taxRegime: '8_percent' | 'graduated';
+  taxpayerType: 'pure_business' | 'mixed_income';
+  deductionMethod: 'osd' | 'itemized'; // 40% OSD or Itemized
+  grossSales: number;
+  salesReturnsDiscounts?: number;
+  costOfSales: number;
+  operatingExpenses: number;
+  nonOperatingIncome: number;
+  costOfSalesBreakdown?: ExpenseAccountItem[];
+  itemizedDeductionsBreakdown?: ExpenseAccountItem[];
+  // Tax credits
+  priorYearExcessCredits: number;
+  quarterlyTaxPaidQ1: number;
+  quarterlyTaxPaidQ2: number;
+  quarterlyTaxPaidQ3: number;
+  cwt2307Credits: number;
+  otherTaxCredits: number;
+  optForInstallment: boolean; // 1st installment April 15, 2nd installment Oct 15
+}
+
+// BIR Form 1702-RT: Annual Income Tax Return for Corporations / Partnerships
+export interface Data1702Annual {
+  rateOption: 'regular_25' | 'msme_20';
+  isMCOptional: boolean; // MCIT 2% after 4th year
+  grossSales: number;
+  salesReturnsDiscounts: number;
+  costOfSales: number;
+  nonOperatingIncome: number;
+  deductionMethod: 'osd' | 'itemized';
+  operatingExpenses: number;
+  costOfSalesBreakdown?: ExpenseAccountItem[];
+  itemizedDeductionsBreakdown?: ExpenseAccountItem[];
+  // Tax credits
+  priorYearExcessCredits: number;
+  quarterlyTaxPaidQ1: number;
+  quarterlyTaxPaidQ2: number;
+  quarterlyTaxPaidQ3: number;
+  cwt2307Credits: number;
+  excessMCITPriorYears: number;
+  otherTaxCredits: number;
+}

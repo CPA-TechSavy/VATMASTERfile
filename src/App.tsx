@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   ClientProfile,
   Data1701Q,
@@ -7,6 +7,8 @@ import {
   Data2551Q,
   Data1601C,
   Data1601EQ,
+  Data1701Annual,
+  Data1702Annual,
   Quarter,
 } from './types/tax';
 import {
@@ -27,8 +29,11 @@ import { Form2550QView } from './components/Form2550QView';
 import { Form2551QView } from './components/Form2551QView';
 import { Form1601CView } from './components/Form1601CView';
 import { Form1601EQView } from './components/Form1601EQView';
+import { Form1701AnnualView } from './components/Form1701AnnualView';
+import { Form1702AnnualView } from './components/Form1702AnnualView';
 import { FilingSummaryView } from './components/FilingSummaryView';
 import { TaxDeadlineCalendar } from './components/TaxDeadlineCalendar';
+import { OfflineIndicator } from './components/OfflineIndicator';
 import {
   FileCheck,
   CalendarDays,
@@ -55,7 +60,10 @@ type FormTab =
   | '2550Q'
   | '2551Q'
   | '1601C'
-  | '1601EQ';
+  | '1601EQ'
+  | '1701Annual'
+  | '1702Annual'
+  | 'annual';
 
 const STORAGE_KEY_CLIENTS = 'bir_app_clients_v2';
 const STORAGE_KEY_DATA = 'bir_app_data_v2';
@@ -125,35 +133,95 @@ export default function App() {
   const [clientToDelete, setClientToDelete] = useState<ClientProfile | null>(null);
   const [deleteClientError, setDeleteClientError] = useState<string | null>(null);
 
+  // Helper to migrate legacy un-quartered data keys (e.g. "client-1") to "client-1_2026_Q1"
+  // so data is strictly isolated by quarter and does not leak into newly selected quarters
+  const sanitizeQuarterMap = <T,>(map: Record<string, T>, defaultPeriodSuffix: string): Record<string, T> => {
+    const cleaned: Record<string, T> = {};
+    for (const [key, val] of Object.entries(map)) {
+      if (key.includes('_Q') || key.includes('_M')) {
+        cleaned[key] = val;
+      } else {
+        // Place into default period (e.g. 2026_Q1) if not already explicitly keyed
+        const isolatedKey = `${key}_${defaultPeriodSuffix}`;
+        if (!cleaned[isolatedKey]) {
+          cleaned[isolatedKey] = val;
+        }
+      }
+    }
+    return cleaned;
+  };
+
   // Per-client calculation data
   const [data1701QMap, setData1701QMap] = useState<Record<string, Data1701Q>>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY_DATA}_1701Q`);
-    return saved ? JSON.parse(saved) : INITIAL_DATA_1701Q;
+    try {
+      const saved = localStorage.getItem(`${STORAGE_KEY_DATA}_1701Q`);
+      return saved ? sanitizeQuarterMap(JSON.parse(saved), '2026_Q1') : sanitizeQuarterMap(INITIAL_DATA_1701Q, '2026_Q1');
+    } catch {
+      return sanitizeQuarterMap(INITIAL_DATA_1701Q, '2026_Q1');
+    }
   });
 
   const [data1702QMap, setData1702QMap] = useState<Record<string, Data1702Q>>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY_DATA}_1702Q`);
-    return saved ? JSON.parse(saved) : INITIAL_DATA_1702Q;
+    try {
+      const saved = localStorage.getItem(`${STORAGE_KEY_DATA}_1702Q`);
+      return saved ? sanitizeQuarterMap(JSON.parse(saved), '2026_Q1') : sanitizeQuarterMap(INITIAL_DATA_1702Q, '2026_Q1');
+    } catch {
+      return sanitizeQuarterMap(INITIAL_DATA_1702Q, '2026_Q1');
+    }
   });
 
   const [data2550QMap, setData2550QMap] = useState<Record<string, Data2550Q>>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY_DATA}_2550Q`);
-    return saved ? JSON.parse(saved) : INITIAL_DATA_2550Q;
+    try {
+      const saved = localStorage.getItem(`${STORAGE_KEY_DATA}_2550Q`);
+      return saved ? sanitizeQuarterMap(JSON.parse(saved), '2026_Q1') : sanitizeQuarterMap(INITIAL_DATA_2550Q, '2026_Q1');
+    } catch {
+      return sanitizeQuarterMap(INITIAL_DATA_2550Q, '2026_Q1');
+    }
   });
 
   const [data2551QMap, setData2551QMap] = useState<Record<string, Data2551Q>>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY_DATA}_2551Q`);
-    return saved ? JSON.parse(saved) : INITIAL_DATA_2551Q;
+    try {
+      const saved = localStorage.getItem(`${STORAGE_KEY_DATA}_2551Q`);
+      return saved ? sanitizeQuarterMap(JSON.parse(saved), '2026_Q1') : sanitizeQuarterMap(INITIAL_DATA_2551Q, '2026_Q1');
+    } catch {
+      return sanitizeQuarterMap(INITIAL_DATA_2551Q, '2026_Q1');
+    }
   });
 
   const [data1601CMap, setData1601CMap] = useState<Record<string, Data1601C>>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY_DATA}_1601C`);
-    return saved ? JSON.parse(saved) : INITIAL_DATA_1601C;
+    try {
+      const saved = localStorage.getItem(`${STORAGE_KEY_DATA}_1601C`);
+      return saved ? sanitizeQuarterMap(JSON.parse(saved), '2026_M1') : sanitizeQuarterMap(INITIAL_DATA_1601C, '2026_M1');
+    } catch {
+      return sanitizeQuarterMap(INITIAL_DATA_1601C, '2026_M1');
+    }
   });
 
   const [data1601EQMap, setData1601EQMap] = useState<Record<string, Data1601EQ>>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY_DATA}_1601EQ`);
-    return saved ? JSON.parse(saved) : INITIAL_DATA_1601EQ;
+    try {
+      const saved = localStorage.getItem(`${STORAGE_KEY_DATA}_1601EQ`);
+      return saved ? sanitizeQuarterMap(JSON.parse(saved), '2026_Q1') : sanitizeQuarterMap(INITIAL_DATA_1601EQ, '2026_Q1');
+    } catch {
+      return sanitizeQuarterMap(INITIAL_DATA_1601EQ, '2026_Q1');
+    }
+  });
+
+  const [data1701AnnualMap, setData1701AnnualMap] = useState<Record<string, Data1701Annual>>(() => {
+    try {
+      const saved = localStorage.getItem(`${STORAGE_KEY_DATA}_1701Annual`);
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const [data1702AnnualMap, setData1702AnnualMap] = useState<Record<string, Data1702Annual>>(() => {
+    try {
+      const saved = localStorage.getItem(`${STORAGE_KEY_DATA}_1702Annual`);
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
   });
 
   // Save to localStorage
@@ -184,6 +252,14 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(`${STORAGE_KEY_DATA}_1601EQ`, JSON.stringify(data1601EQMap));
   }, [data1601EQMap]);
+
+  useEffect(() => {
+    localStorage.setItem(`${STORAGE_KEY_DATA}_1701Annual`, JSON.stringify(data1701AnnualMap));
+  }, [data1701AnnualMap]);
+
+  useEffect(() => {
+    localStorage.setItem(`${STORAGE_KEY_DATA}_1702Annual`, JSON.stringify(data1702AnnualMap));
+  }, [data1702AnnualMap]);
 
   // Current client
   const activeClient: ClientProfile | null = clients.find((c) => c.id === activeClientId) || clients[0] || null;
@@ -253,6 +329,18 @@ export default function App() {
         reason: `BIR Form 0619-E / 1601-EQ is locked. ${activeClient.tradeName} does not have withholding agent status enabled.`,
       };
     }
+    if (tab === '1701Annual' && !isSingle) {
+      return {
+        locked: true,
+        reason: `BIR Form 1701 (Annual ITR) is locked. ${activeClient.tradeName} is classified as "${activeClient.classification}" and must file BIR Form 1702-RT (Annual) instead.`,
+      };
+    }
+    if (tab === '1702Annual' && isSingle) {
+      return {
+        locked: true,
+        reason: `BIR Form 1702-RT (Annual ITR) is locked. ${activeClient.tradeName} is a Single Proprietorship and must file BIR Form 1701 (Annual) instead.`,
+      };
+    }
     return { locked: false };
   };
 
@@ -280,17 +368,18 @@ export default function App() {
         setActiveTab('1702Q');
       } else if (activeTab === '1702Q' && isSingle) {
         setActiveTab('1701Q');
+      } else if (activeTab === '1701Annual' && !isSingle) {
+        setActiveTab('1702Annual');
+      } else if (activeTab === '1702Annual' && isSingle) {
+        setActiveTab('1701Annual');
       } else if ((activeTab === '1601C' || activeTab === '1601EQ') && !isWithholding) {
         setActiveTab('summary');
       }
     }
   }, [activeClientId, isVat, isSingle, isWithholding, activeTab]);
 
-  // Client data fallbacks - keyed by activeClient.id and activeClient.id_year_quarter to persist per quarter
-  const currentQuarterKey = activeClient ? `${activeClient.id}_${year}_${quarter}` : `default_${year}_${quarter}`;
-  const currentMonthKey = activeClient ? `${activeClient.id}_${year}_M${month}` : `default_${year}_M${month}`;
-
-  const current1701Q = (activeClient && (data1701QMap[currentQuarterKey] || data1701QMap[activeClient.id])) || {
+  // Factory functions for fresh, clean form data when entering a new quarter
+  const createClean1701Q = (): Data1701Q => ({
     taxRegime: 'graduated',
     taxpayerType: 'pure_business',
     deductionMethod: 'osd',
@@ -303,9 +392,9 @@ export default function App() {
     quarterlyTaxPaidPriorQuarters: 0,
     cwt2307Credits: 0,
     otherTaxCredits: 0,
-  };
+  });
 
-  const current1702Q = (activeClient && (data1702QMap[currentQuarterKey] || data1702QMap[activeClient.id])) || {
+  const createClean1702Q = (): Data1702Q => ({
     rateOption: 'regular_25',
     isMCOptional: true,
     grossSales: 0,
@@ -316,9 +405,9 @@ export default function App() {
     priorQuarterTaxPaid: 0,
     cwt2307Credits: 0,
     otherTaxCredits: 0,
-  };
+  });
 
-  const current2550Q = (activeClient && (data2550QMap[currentQuarterKey] || data2550QMap[activeClient.id])) || {
+  const createClean2550Q = (): Data2550Q => ({
     vatableSales: 0,
     salesToGovernment: 0,
     zeroRatedSales: 0,
@@ -331,18 +420,22 @@ export default function App() {
     withheldVat2307Govt: 0,
     withheldVat2307Private: 0,
     priorPaymentsThisQuarter: 0,
-  };
+  });
 
-  const current2551Q = (activeClient && (data2551QMap[currentQuarterKey] || data2551QMap[activeClient.id])) || {
+  const createClean2551Q = (): Data2551Q => ({
     atcCode: 'PT010',
     taxRatePercent: 3,
     grossSalesCurrentQuarter: 0,
     exemptSales: 0,
+    vatableSales: 0,
+    salesToGovernment: 0,
+    zeroRatedSales: 0,
+    vatExemptSales: 0,
     cwt2307Credits: 0,
     priorQuarterTaxPaid: 0,
-  };
+  });
 
-  const current1601C = (activeClient && (data1601CMap[currentMonthKey] || data1601CMap[activeClient.id])) || {
+  const createClean1601C = (): Data1601C => ({
     totalGrossCompensation: 0,
     minimumWageEarners: 0,
     statutoryContributions: 0,
@@ -350,9 +443,9 @@ export default function App() {
     otherNonTaxableCompensation: 0,
     taxWithheldAdjustments: 0,
     taxRemittedPreviously: 0,
-  };
+  });
 
-  const current1601EQ = (activeClient && (data1601EQMap[currentQuarterKey] || data1601EQMap[activeClient.id])) || {
+  const createClean1601EQ = (): Data1601EQ => ({
     isMonthly: true,
     priorMonthTaxRemitted: 0,
     overpaymentPreviousPeriod: 0,
@@ -365,7 +458,665 @@ export default function App() {
         taxBase: 0,
       },
     ],
+  });
+
+  const createClean1701Annual = (): Data1701Annual => ({
+    taxRegime: 'graduated',
+    taxpayerType: 'pure_business',
+    deductionMethod: 'osd',
+    grossSales: 0,
+    costOfSales: 0,
+    operatingExpenses: 0,
+    nonOperatingIncome: 0,
+    priorYearExcessCredits: 0,
+    quarterlyTaxPaidQ1: 0,
+    quarterlyTaxPaidQ2: 0,
+    quarterlyTaxPaidQ3: 0,
+    cwt2307Credits: 0,
+    otherTaxCredits: 0,
+    optForInstallment: false,
+  });
+
+  const createClean1702Annual = (): Data1702Annual => ({
+    rateOption: 'regular_25',
+    isMCOptional: true,
+    grossSales: 0,
+    salesReturnsDiscounts: 0,
+    costOfSales: 0,
+    nonOperatingIncome: 0,
+    deductionMethod: 'osd',
+    operatingExpenses: 0,
+    priorYearExcessCredits: 0,
+    quarterlyTaxPaidQ1: 0,
+    quarterlyTaxPaidQ2: 0,
+    quarterlyTaxPaidQ3: 0,
+    cwt2307Credits: 0,
+    excessMCITPriorYears: 0,
+    otherTaxCredits: 0,
+  });
+
+  // Client data keys strictly per quarter and month so data in Q1 is cleared when moving to Q2
+  const currentQuarterKey = activeClient ? `${activeClient.id}_${year}_${quarter}` : `default_${year}_${quarter}`;
+  const currentMonthKey = activeClient ? `${activeClient.id}_${year}_M${month}` : `default_${year}_M${month}`;
+  const currentAnnualKey = activeClient ? `${activeClient.id}_${year}` : `default_${year}`;
+
+  // Raw forms for the selected quarter
+  const raw2550Q = (activeClient && data2550QMap[currentQuarterKey]) || createClean2550Q();
+  const raw2551Q = (activeClient && data2551QMap[currentQuarterKey]) || createClean2551Q();
+
+  // Automatic Gross Sales synchronization:
+  // Determine which form (2550Q or 2551Q) is not locked for the client:
+  // VAT registered -> 2550Q is not locked (2551Q is locked)
+  // Non-VAT -> 2551Q is not locked (2550Q is locked)
+  const isVatRegistered = activeClient?.vatStatus === 'vat-registered';
+  const unlockedSalesForm: '2550Q' | '2551Q' = isVatRegistered ? '2550Q' : '2551Q';
+
+  const combinedSales2550Q =
+    (Number(raw2550Q.vatableSales) || 0) +
+    (Number(raw2550Q.salesToGovernment) || 0) +
+    (Number(raw2550Q.zeroRatedSales) || 0) +
+    (Number(raw2550Q.vatExemptSales) || 0);
+
+  const hasBreakdown2551Q =
+    raw2551Q.vatableSales !== undefined ||
+    raw2551Q.salesToGovernment !== undefined ||
+    raw2551Q.zeroRatedSales !== undefined ||
+    raw2551Q.vatExemptSales !== undefined;
+
+  const combinedSales2551Q = hasBreakdown2551Q
+    ? (Number(raw2551Q.vatableSales) || 0) +
+      (Number(raw2551Q.salesToGovernment) || 0) +
+      (Number(raw2551Q.zeroRatedSales) || 0) +
+      (Number(raw2551Q.vatExemptSales !== undefined ? raw2551Q.vatExemptSales : raw2551Q.exemptSales) || 0)
+    : (Number(raw2551Q.grossSalesCurrentQuarter) || 0);
+
+  const unlockedCombinedSales = isVatRegistered ? combinedSales2550Q : combinedSales2551Q;
+
+  const salesSourceInfo = {
+    formName: unlockedSalesForm,
+    combinedSales: unlockedCombinedSales,
+    isVat: isVatRegistered,
   };
+
+  const raw1702Q = (activeClient && data1702QMap[currentQuarterKey]) || createClean1702Q();
+  const raw1701Q = (activeClient && data1701QMap[currentQuarterKey]) || createClean1701Q();
+
+  // In case of Corporation, Gross Sales in 1702Q automatically reflects Combined Sales in 2550Q or 2551Q (unlocked form)
+  const current1702Q: Data1702Q = useMemo(() => {
+    if (!activeClient) return raw1702Q;
+    if (activeClient.classification === 'Corporation') {
+      return {
+        ...raw1702Q,
+        grossSales: unlockedCombinedSales,
+      };
+    }
+    return raw1702Q;
+  }, [raw1702Q, activeClient?.classification, unlockedCombinedSales]);
+
+  // Same for Single Proprietorship, Gross Sales in 1701Q automatically reflects Combined Sales in 2550Q or 2551Q (unlocked form)
+  const current1701Q: Data1701Q = useMemo(() => {
+    if (!activeClient) return raw1701Q;
+    if (activeClient.classification === 'Single') {
+      return {
+        ...raw1701Q,
+        grossSalesCurrentQuarter: unlockedCombinedSales,
+      };
+    }
+    return raw1701Q;
+  }, [raw1701Q, activeClient?.classification, unlockedCombinedSales]);
+
+  const current2550Q = raw2550Q;
+  const current2551Q = raw2551Q;
+  const current1601C = (activeClient && data1601CMap[currentMonthKey]) || createClean1601C();
+
+  // 1601EQ / 0619E Multi-Mode Period Data (Month 1, Month 2, Month 3, and Quarter Combined)
+  const [ewtPeriodMode, setEwtPeriodMode] = useState<'m1' | 'm2' | 'm3' | 'quarter'>('quarter');
+
+  const monthsForQuarter: Record<Quarter, [number, number, number]> = {
+    Q1: [1, 2, 3],
+    Q2: [4, 5, 6],
+    Q3: [7, 8, 9],
+    Q4: [10, 11, 12],
+  };
+
+  const quarterMonths = monthsForQuarter[quarter];
+  const m1Num = quarterMonths[0];
+  const m2Num = quarterMonths[1];
+  const m3Num = quarterMonths[2];
+
+  const m1Key = activeClient ? `${activeClient.id}_${year}_M${m1Num}` : `default_${year}_M${m1Num}`;
+  const m2Key = activeClient ? `${activeClient.id}_${year}_M${m2Num}` : `default_${year}_M${m2Num}`;
+  const m3Key = activeClient ? `${activeClient.id}_${year}_M${m3Num}` : `default_${year}_M${m3Num}`;
+
+  const month1Data = (activeClient && data1601EQMap[m1Key]) || { ...createClean1601EQ(), isMonthly: true };
+  const month2Data = (activeClient && data1601EQMap[m2Key]) || { ...createClean1601EQ(), isMonthly: true };
+  const month3Data = (activeClient && data1601EQMap[m3Key]) || { ...createClean1601EQ(), isMonthly: true };
+  const quarterCombinedData = (activeClient && data1601EQMap[currentQuarterKey]) || { ...createClean1601EQ(), isMonthly: false };
+
+  const current1601EQ =
+    ewtPeriodMode === 'm1'
+      ? month1Data
+      : ewtPeriodMode === 'm2'
+      ? month2Data
+      : ewtPeriodMode === 'm3'
+      ? month3Data
+      : quarterCombinedData;
+
+  const handleUpdate1601EQ = (updated: Data1601EQ) => {
+    const targetKey =
+      ewtPeriodMode === 'm1'
+        ? m1Key
+        : ewtPeriodMode === 'm2'
+        ? m2Key
+        : ewtPeriodMode === 'm3'
+        ? m3Key
+        : currentQuarterKey;
+
+    setData1601EQMap((prev) => ({
+      ...prev,
+      [targetKey]: updated,
+    }));
+  };
+
+  const handleConsolidateMonths = () => {
+    if (!activeClient) return;
+    const allLines: typeof month1Data.lineItems = [];
+    const pushLines = (items: typeof month1Data.lineItems, monthLabel: string) => {
+      (items || []).forEach((item) => {
+        if (item.taxBase > 0) {
+          allLines.push({
+            ...item,
+            id: `ewt-c-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+            description: `${item.description} (${monthLabel})`,
+          });
+        }
+      });
+    };
+    pushLines(month1Data.lineItems || [], `Month ${m1Num}`);
+    pushLines(month2Data.lineItems || [], `Month ${m2Num}`);
+    pushLines(month3Data.lineItems || [], `Month ${m3Num}`);
+
+    const m1Withheld = (month1Data.lineItems || []).reduce((sum, i) => sum + i.taxBase * (i.ratePercent / 100), 0);
+    const m2Withheld = (month2Data.lineItems || []).reduce((sum, i) => sum + i.taxBase * (i.ratePercent / 100), 0);
+
+    const consolidatedQuarter: Data1601EQ = {
+      ...quarterCombinedData,
+      isMonthly: false,
+      lineItems: allLines.length > 0 ? allLines : quarterCombinedData.lineItems,
+      priorMonthTaxRemitted: m1Withheld + m2Withheld,
+    };
+
+    setData1601EQMap((prev) => ({
+      ...prev,
+      [currentQuarterKey]: consolidatedQuarter,
+    }));
+    setEwtPeriodMode('quarter');
+  };
+
+  // Annual ITR (1701 for Single vs 1702-RT for Corporation)
+  const raw1701Annual = (activeClient && data1701AnnualMap[currentAnnualKey]) || createClean1701Annual();
+  const raw1702Annual = (activeClient && data1702AnnualMap[currentAnnualKey]) || createClean1702Annual();
+
+  // Summary of Q1-Q4 for 1701
+  const quarters1701Summary = useMemo(() => {
+    if (!activeClient) {
+      return {
+        q1Sales: 0,
+        q2Sales: 0,
+        q3Sales: 0,
+        q4Sales: 0,
+        q1TaxPaid: 0,
+        q2TaxPaid: 0,
+        q3TaxPaid: 0,
+        totalCwt: 0,
+        sourceForm: unlockedSalesForm,
+        totalSales: 0,
+      };
+    }
+
+    // Helper to get combined sales for a quarter from the unlocked sales form (2550Q for VAT, 2551Q for Non-VAT)
+    const getQuarterlySalesFromUnlockedForm = (q: Quarter): number => {
+      const qKey = `${activeClient.id}_${year}_${q}`;
+      if (isVatRegistered) {
+        // 2550Q is NOT locked
+        const data2550 = (q === quarter ? raw2550Q : data2550QMap[qKey]) || {
+          vatableSales: 0,
+          salesToGovernment: 0,
+          zeroRatedSales: 0,
+          vatExemptSales: 0,
+        };
+        return (
+          (Number(data2550.vatableSales) || 0) +
+          (Number(data2550.salesToGovernment) || 0) +
+          (Number(data2550.zeroRatedSales) || 0) +
+          (Number(data2550.vatExemptSales) || 0)
+        );
+      } else {
+        // 2551Q is NOT locked
+        const data2551 = (q === quarter ? raw2551Q : data2551QMap[qKey]) || {
+          grossSalesCurrentQuarter: 0,
+          exemptSales: 0,
+        };
+        const hasBreakdown =
+          data2551.vatableSales !== undefined ||
+          data2551.salesToGovernment !== undefined ||
+          data2551.zeroRatedSales !== undefined ||
+          data2551.vatExemptSales !== undefined;
+
+        if (hasBreakdown) {
+          return (
+            (Number(data2551.vatableSales) || 0) +
+            (Number(data2551.salesToGovernment) || 0) +
+            (Number(data2551.zeroRatedSales) || 0) +
+            (Number(
+              data2551.vatExemptSales !== undefined
+                ? data2551.vatExemptSales
+                : data2551.exemptSales
+            ) || 0)
+          );
+        }
+        return Number(data2551.grossSalesCurrentQuarter) || 0;
+      }
+    };
+
+    const q1SalesVal = getQuarterlySalesFromUnlockedForm('Q1');
+    const q2SalesVal = getQuarterlySalesFromUnlockedForm('Q2');
+    const q3SalesVal = getQuarterlySalesFromUnlockedForm('Q3');
+    const q4SalesVal = getQuarterlySalesFromUnlockedForm('Q4');
+    const totalSalesVal = q1SalesVal + q2SalesVal + q3SalesVal + q4SalesVal;
+
+    const getQ = (q: Quarter) => (q === quarter ? raw1701Q : data1701QMap[`${activeClient.id}_${year}_${q}`]);
+    const q1 = getQ('Q1');
+    const q2 = getQ('Q2');
+    const q3 = getQ('Q3');
+    const q4 = getQ('Q4');
+
+    return {
+      q1Sales: q1SalesVal,
+      q2Sales: q2SalesVal,
+      q3Sales: q3SalesVal,
+      q4Sales: q4SalesVal,
+      totalSales: totalSalesVal,
+      sourceForm: unlockedSalesForm,
+      q1TaxPaid: Number(q1?.quarterlyTaxPaidPriorQuarters) || 0,
+      q2TaxPaid: Number(q2?.quarterlyTaxPaidPriorQuarters) || 0,
+      q3TaxPaid: Number(q3?.quarterlyTaxPaidPriorQuarters) || 0,
+      totalCwt:
+        (Number(q1?.cwt2307Credits) || 0) +
+        (Number(q2?.cwt2307Credits) || 0) +
+        (Number(q3?.cwt2307Credits) || 0) +
+        (Number(q4?.cwt2307Credits) || 0),
+    };
+  }, [
+    activeClient,
+    year,
+    data1701QMap,
+    quarter,
+    raw1701Q,
+    isVatRegistered,
+    raw2550Q,
+    data2550QMap,
+    raw2551Q,
+    data2551QMap,
+    unlockedSalesForm,
+  ]);
+
+  // Summary of Q1-Q4 for 1702
+  const quarters1702Summary = useMemo(() => {
+    if (!activeClient) {
+      return {
+        q1Sales: 0,
+        q2Sales: 0,
+        q3Sales: 0,
+        q4Sales: 0,
+        q1TaxPaid: 0,
+        q2TaxPaid: 0,
+        q3TaxPaid: 0,
+        totalCwt: 0,
+        sourceForm: unlockedSalesForm,
+        totalSales: 0,
+      };
+    }
+
+    // Helper to get combined sales for a quarter from the unlocked sales form (2550Q for VAT, 2551Q for Non-VAT)
+    const getQuarterlySalesFromUnlockedForm = (q: Quarter): number => {
+      const qKey = `${activeClient.id}_${year}_${q}`;
+      if (isVatRegistered) {
+        // 2550Q is NOT locked
+        const data2550 = (q === quarter ? raw2550Q : data2550QMap[qKey]) || {
+          vatableSales: 0,
+          salesToGovernment: 0,
+          zeroRatedSales: 0,
+          vatExemptSales: 0,
+        };
+        return (
+          (Number(data2550.vatableSales) || 0) +
+          (Number(data2550.salesToGovernment) || 0) +
+          (Number(data2550.zeroRatedSales) || 0) +
+          (Number(data2550.vatExemptSales) || 0)
+        );
+      } else {
+        // 2551Q is NOT locked
+        const data2551 = (q === quarter ? raw2551Q : data2551QMap[qKey]) || {
+          grossSalesCurrentQuarter: 0,
+          exemptSales: 0,
+        };
+        const hasBreakdown =
+          data2551.vatableSales !== undefined ||
+          data2551.salesToGovernment !== undefined ||
+          data2551.zeroRatedSales !== undefined ||
+          data2551.vatExemptSales !== undefined;
+
+        if (hasBreakdown) {
+          return (
+            (Number(data2551.vatableSales) || 0) +
+            (Number(data2551.salesToGovernment) || 0) +
+            (Number(data2551.zeroRatedSales) || 0) +
+            (Number(
+              data2551.vatExemptSales !== undefined
+                ? data2551.vatExemptSales
+                : data2551.exemptSales
+            ) || 0)
+          );
+        }
+        return Number(data2551.grossSalesCurrentQuarter) || 0;
+      }
+    };
+
+    const q1SalesVal = getQuarterlySalesFromUnlockedForm('Q1');
+    const q2SalesVal = getQuarterlySalesFromUnlockedForm('Q2');
+    const q3SalesVal = getQuarterlySalesFromUnlockedForm('Q3');
+    const q4SalesVal = getQuarterlySalesFromUnlockedForm('Q4');
+    const totalSalesVal = q1SalesVal + q2SalesVal + q3SalesVal + q4SalesVal;
+
+    const getQ = (q: Quarter) => (q === quarter ? raw1702Q : data1702QMap[`${activeClient.id}_${year}_${q}`]);
+    const q1 = getQ('Q1');
+    const q2 = getQ('Q2');
+    const q3 = getQ('Q3');
+    const q4 = getQ('Q4');
+
+    return {
+      q1Sales: q1SalesVal,
+      q2Sales: q2SalesVal,
+      q3Sales: q3SalesVal,
+      q4Sales: q4SalesVal,
+      totalSales: totalSalesVal,
+      sourceForm: unlockedSalesForm,
+      q1TaxPaid: Number(q1?.priorQuarterTaxPaid) || 0,
+      q2TaxPaid: Number(q2?.priorQuarterTaxPaid) || 0,
+      q3TaxPaid: Number(q3?.priorQuarterTaxPaid) || 0,
+      totalCwt:
+        (Number(q1?.cwt2307Credits) || 0) +
+        (Number(q2?.cwt2307Credits) || 0) +
+        (Number(q3?.cwt2307Credits) || 0) +
+        (Number(q4?.cwt2307Credits) || 0),
+    };
+  }, [
+    activeClient,
+    year,
+    data1702QMap,
+    quarter,
+    raw1702Q,
+    isVatRegistered,
+    raw2550Q,
+    data2550QMap,
+    raw2551Q,
+    data2551QMap,
+    unlockedSalesForm,
+  ]);
+
+  const handleAutoPull1701Quarters = () => {
+    // Consolidate Combined Sales from unlocked form (2550Q or 2551Q) across Q1-Q4 as Gross Sales in 1701
+    const totalSales =
+      quarters1701Summary.q1Sales +
+      quarters1701Summary.q2Sales +
+      quarters1701Summary.q3Sales +
+      quarters1701Summary.q4Sales;
+
+    setData1701AnnualMap((prev) => ({
+      ...prev,
+      [currentAnnualKey]: {
+        ...raw1701Annual,
+        grossSales: totalSales,
+        quarterlyTaxPaidQ1: quarters1701Summary.q1TaxPaid,
+        quarterlyTaxPaidQ2: quarters1701Summary.q2TaxPaid,
+        quarterlyTaxPaidQ3: quarters1701Summary.q3TaxPaid,
+        cwt2307Credits: quarters1701Summary.totalCwt,
+      },
+    }));
+  };
+
+  const handleAutoPull1702Quarters = () => {
+    // Consolidate Combined Sales from unlocked form (2550Q or 2551Q) across Q1-Q4 as Gross Sales in 1702
+    const totalSales =
+      quarters1702Summary.q1Sales +
+      quarters1702Summary.q2Sales +
+      quarters1702Summary.q3Sales +
+      quarters1702Summary.q4Sales;
+
+    setData1702AnnualMap((prev) => ({
+      ...prev,
+      [currentAnnualKey]: {
+        ...raw1702Annual,
+        grossSales: totalSales,
+        quarterlyTaxPaidQ1: quarters1702Summary.q1TaxPaid,
+        quarterlyTaxPaidQ2: quarters1702Summary.q2TaxPaid,
+        quarterlyTaxPaidQ3: quarters1702Summary.q3TaxPaid,
+        cwt2307Credits: quarters1702Summary.totalCwt,
+      },
+    }));
+  };
+
+  // Multi-year data for comparative financial statements & trends
+  const allYears1702Data: Record<number, Data1702Annual> = useMemo(() => {
+    if (!activeClient) return {};
+    const map: Record<number, Data1702Annual> = {};
+    Object.keys(data1702AnnualMap).forEach((key) => {
+      if (key.startsWith(`${activeClient.id}_`)) {
+        const yearStr = key.replace(`${activeClient.id}_`, '');
+        const y = parseInt(yearStr, 10);
+        if (!isNaN(y) && data1702AnnualMap[key]) {
+          map[y] = data1702AnnualMap[key];
+        }
+      }
+    });
+    // Include current year data
+    map[year] = raw1702Annual;
+
+    // Provide realistic historical benchmarks if not explicitly created yet
+    const curSales = raw1702Annual.grossSales || 18500000;
+    const curCost = raw1702Annual.costOfSales || curSales * 0.58;
+    const curExp = raw1702Annual.operatingExpenses || curSales * 0.22;
+
+    if (!map[year - 1]) {
+      map[year - 1] = {
+        rateOption: raw1702Annual.rateOption || 'regular_25',
+        isMCOptional: false,
+        grossSales: Math.round(curSales * 0.88),
+        salesReturnsDiscounts: 0,
+        costOfSales: Math.round(curCost * 0.90),
+        nonOperatingIncome: 50000,
+        deductionMethod: 'itemized',
+        operatingExpenses: Math.round(curExp * 0.92),
+        priorYearExcessCredits: 0,
+        quarterlyTaxPaidQ1: 0,
+        quarterlyTaxPaidQ2: 0,
+        quarterlyTaxPaidQ3: 0,
+        cwt2307Credits: 0,
+        excessMCITPriorYears: 0,
+        otherTaxCredits: 0,
+      };
+    }
+    if (!map[year - 2]) {
+      const py1Sales = map[year - 1]?.grossSales || curSales * 0.88;
+      map[year - 2] = {
+        rateOption: 'regular_25',
+        isMCOptional: false,
+        grossSales: Math.round(py1Sales * 0.85),
+        salesReturnsDiscounts: 0,
+        costOfSales: Math.round(curCost * 0.80),
+        nonOperatingIncome: 35000,
+        deductionMethod: 'itemized',
+        operatingExpenses: Math.round(curExp * 0.84),
+        priorYearExcessCredits: 0,
+        quarterlyTaxPaidQ1: 0,
+        quarterlyTaxPaidQ2: 0,
+        quarterlyTaxPaidQ3: 0,
+        cwt2307Credits: 0,
+        excessMCITPriorYears: 0,
+        otherTaxCredits: 0,
+      };
+    }
+    if (!map[year - 3]) {
+      const py2Sales = map[year - 2]?.grossSales || curSales * 0.75;
+      map[year - 3] = {
+        rateOption: 'regular_25',
+        isMCOptional: false,
+        grossSales: Math.round(py2Sales * 0.86),
+        salesReturnsDiscounts: 0,
+        costOfSales: Math.round(curCost * 0.70),
+        nonOperatingIncome: 25000,
+        deductionMethod: 'itemized',
+        operatingExpenses: Math.round(curExp * 0.78),
+        priorYearExcessCredits: 0,
+        quarterlyTaxPaidQ1: 0,
+        quarterlyTaxPaidQ2: 0,
+        quarterlyTaxPaidQ3: 0,
+        cwt2307Credits: 0,
+        excessMCITPriorYears: 0,
+        otherTaxCredits: 0,
+      };
+    }
+    return map;
+  }, [data1702AnnualMap, activeClient, year, raw1702Annual]);
+
+  const handleUpdateHistorical1702Year = (histYear: number, updatedData: Data1702Annual) => {
+    if (!activeClient) return;
+    setData1702AnnualMap((prev) => ({
+      ...prev,
+      [`${activeClient.id}_${histYear}`]: updatedData,
+    }));
+  };
+
+  // Multi-Year Historical Data for Form 1701 (Individual Annual Return)
+  const allYears1701Data = useMemo(() => {
+    const map: Record<number, Data1701Annual> = {};
+    if (!activeClient) return map;
+
+    // Load any saved year statements
+    [year - 3, year - 2, year - 1, year].forEach((y) => {
+      const k = `${activeClient.id}_${y}`;
+      if (data1701AnnualMap[k]) {
+        map[y] = data1701AnnualMap[k];
+      }
+    });
+
+    map[year] = raw1701Annual;
+
+    const curSales = raw1701Annual.grossSales || 1800000;
+    const curCost = raw1701Annual.costOfSales || curSales * 0.40;
+    const curExp = raw1701Annual.operatingExpenses || curSales * 0.25;
+
+    if (!map[year - 1]) {
+      map[year - 1] = {
+        taxRegime: raw1701Annual.taxRegime || 'graduated',
+        taxpayerType: 'pure_business',
+        deductionMethod: raw1701Annual.deductionMethod || 'osd',
+        grossSales: Math.round(curSales * 0.88),
+        salesReturnsDiscounts: 0,
+        costOfSales: Math.round(curCost * 0.90),
+        nonOperatingIncome: 30000,
+        operatingExpenses: Math.round(curExp * 0.92),
+        priorYearExcessCredits: 0,
+        quarterlyTaxPaidQ1: 0,
+        quarterlyTaxPaidQ2: 0,
+        quarterlyTaxPaidQ3: 0,
+        cwt2307Credits: 0,
+        otherTaxCredits: 0,
+        optForInstallment: false,
+      };
+    }
+    if (!map[year - 2]) {
+      const py1Sales = map[year - 1]?.grossSales || curSales * 0.88;
+      map[year - 2] = {
+        taxRegime: 'graduated',
+        taxpayerType: 'pure_business',
+        deductionMethod: 'osd',
+        grossSales: Math.round(py1Sales * 0.85),
+        salesReturnsDiscounts: 0,
+        costOfSales: Math.round(curCost * 0.80),
+        nonOperatingIncome: 20000,
+        operatingExpenses: Math.round(curExp * 0.84),
+        priorYearExcessCredits: 0,
+        quarterlyTaxPaidQ1: 0,
+        quarterlyTaxPaidQ2: 0,
+        quarterlyTaxPaidQ3: 0,
+        cwt2307Credits: 0,
+        otherTaxCredits: 0,
+        optForInstallment: false,
+      };
+    }
+    if (!map[year - 3]) {
+      const py2Sales = map[year - 2]?.grossSales || curSales * 0.75;
+      map[year - 3] = {
+        taxRegime: 'graduated',
+        taxpayerType: 'pure_business',
+        deductionMethod: 'osd',
+        grossSales: Math.round(py2Sales * 0.86),
+        salesReturnsDiscounts: 0,
+        costOfSales: Math.round(curCost * 0.70),
+        nonOperatingIncome: 15000,
+        operatingExpenses: Math.round(curExp * 0.78),
+        priorYearExcessCredits: 0,
+        quarterlyTaxPaidQ1: 0,
+        quarterlyTaxPaidQ2: 0,
+        quarterlyTaxPaidQ3: 0,
+        cwt2307Credits: 0,
+        otherTaxCredits: 0,
+        optForInstallment: false,
+      };
+    }
+    return map;
+  }, [data1701AnnualMap, activeClient, year, raw1701Annual]);
+
+  const handleUpdateHistorical1701Year = (histYear: number, updatedData: Data1701Annual) => {
+    if (!activeClient) return;
+    setData1701AnnualMap((prev) => ({
+      ...prev,
+      [`${activeClient.id}_${histYear}`]: updatedData,
+    }));
+  };
+
+  // 1601-C Yearly Data across all 12 months for Cumulative calculation
+  const yearly1601CData = useMemo(() => {
+    const map: Record<number, Data1601C> = {};
+    if (!activeClient) return map;
+    for (let m = 1; m <= 12; m++) {
+      const k = `${activeClient.id}_${year}_M${m}`;
+      if (data1601CMap[k]) {
+        map[m] = data1601CMap[k];
+      }
+    }
+    if (current1601C) {
+      map[month] = current1601C;
+    }
+    return map;
+  }, [data1601CMap, activeClient, year, month, current1601C]);
+
+  // 1601-EQ & 0619-E Yearly Data across all months and quarters for Cumulative calculation
+  const yearly1601EQData = useMemo(() => {
+    const map: Record<string, Data1601EQ> = {};
+    if (!activeClient) return map;
+    for (let m = 1; m <= 12; m++) {
+      const mk = `${activeClient.id}_${year}_M${m}`;
+      if (data1601EQMap[mk]) map[`M${m}`] = data1601EQMap[mk];
+    }
+    (['Q1', 'Q2', 'Q3', 'Q4'] as Quarter[]).forEach((q) => {
+      const qk = `${activeClient.id}_${year}_${q}`;
+      if (data1601EQMap[qk]) map[q] = data1601EQMap[qk];
+    });
+    return map;
+  }, [data1601EQMap, activeClient, year]);
 
   // Client actions
   const handleSaveClient = (saved: ClientProfile) => {
@@ -382,6 +1133,8 @@ export default function App() {
 
     if (activeTab === '1701Q' && !cIsSingle) setActiveTab('1702Q');
     else if (activeTab === '1702Q' && cIsSingle) setActiveTab('1701Q');
+    else if (activeTab === '1701Annual' && !cIsSingle) setActiveTab('1702Annual');
+    else if (activeTab === '1702Annual' && cIsSingle) setActiveTab('1701Annual');
     else if (activeTab === '2550Q' && !cIsVat) setActiveTab('2551Q');
     else if (activeTab === '2551Q' && cIsVat) setActiveTab('2550Q');
     else if ((activeTab === '1601C' || activeTab === '1601EQ') && !cIsWithholding) setActiveTab('summary');
@@ -438,6 +1191,18 @@ export default function App() {
     delete next1601EQ[idToDelete];
     setData1601EQMap(next1601EQ);
 
+    const next1701Annual = { ...data1701AnnualMap };
+    Object.keys(next1701Annual).forEach((k) => {
+      if (k.startsWith(`${idToDelete}_`)) delete next1701Annual[k];
+    });
+    setData1701AnnualMap(next1701Annual);
+
+    const next1702Annual = { ...data1702AnnualMap };
+    Object.keys(next1702Annual).forEach((k) => {
+      if (k.startsWith(`${idToDelete}_`)) delete next1702Annual[k];
+    });
+    setData1702AnnualMap(next1702Annual);
+
     if (activeClientId === idToDelete) {
       setActiveClientId(remainingClients[0]?.id || '');
     }
@@ -454,6 +1219,8 @@ export default function App() {
       setData2551QMap({});
       setData1601CMap({});
       setData1601EQMap({});
+      setData1701AnnualMap({});
+      setData1702AnnualMap({});
       localStorage.clear();
     }
   };
@@ -469,6 +1236,8 @@ export default function App() {
       data2551QMap,
       data1601CMap,
       data1601EQMap,
+      data1701AnnualMap,
+      data1702AnnualMap,
     };
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -496,6 +1265,8 @@ export default function App() {
         if (parsed.data2551QMap) setData2551QMap(parsed.data2551QMap);
         if (parsed.data1601CMap) setData1601CMap(parsed.data1601CMap);
         if (parsed.data1601EQMap) setData1601EQMap(parsed.data1601EQMap);
+        if (parsed.data1701AnnualMap) setData1701AnnualMap(parsed.data1701AnnualMap);
+        if (parsed.data1702AnnualMap) setData1702AnnualMap(parsed.data1702AnnualMap);
         alert('Tax portfolio imported successfully!');
       } catch (err) {
         alert('Failed to parse JSON file.');
@@ -520,6 +1291,8 @@ export default function App() {
 
           if (activeTab === '1701Q' && !cIsSingle) setActiveTab('1702Q');
           else if (activeTab === '1702Q' && cIsSingle) setActiveTab('1701Q');
+          else if (activeTab === '1701Annual' && !cIsSingle) setActiveTab('1702Annual');
+          else if (activeTab === '1702Annual' && cIsSingle) setActiveTab('1701Annual');
           else if (activeTab === '2550Q' && !cIsVat) setActiveTab('2551Q');
           else if (activeTab === '2551Q' && cIsVat) setActiveTab('2550Q');
           else if ((activeTab === '1601C' || activeTab === '1601EQ') && !cIsWithholding) setActiveTab('summary');
@@ -760,6 +1533,64 @@ export default function App() {
               </button>
             );
           })()}
+
+          {/* Form 1701 (Annual Income Tax Return for Individuals / Single Proprietorship) */}
+          {(() => {
+            const lock = getTabLockInfo('1701Annual');
+            return (
+              <button
+                id="tab-1701annual-btn"
+                onClick={() => handleSelectTab('1701Annual')}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
+                  lock.locked
+                    ? 'opacity-40 cursor-not-allowed bg-slate-100 text-slate-400 border border-slate-200 shadow-none'
+                    : activeTab === '1701Annual'
+                    ? 'bg-blue-700 text-white shadow-xs'
+                    : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
+                }`}
+                title={lock.locked ? lock.reason : 'Open BIR Form 1701 (Annual ITR for Single / Individuals)'}
+              >
+                {lock.locked ? <Lock className="w-3.5 h-3.5 text-slate-400" /> : <FileCheck className="w-3.5 h-3.5 text-blue-500" />}
+                <span>1701 (Annual)</span>
+                {lock.locked ? (
+                  <span className="text-[10px] px-1.5 py-0.2 bg-slate-200/80 text-slate-600 rounded font-mono font-medium">
+                    Locked
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-normal opacity-80 hidden sm:inline">(Single/Indiv)</span>
+                )}
+              </button>
+            );
+          })()}
+
+          {/* Form 1702-RT (Annual Income Tax Return for Corporations and Partnerships) */}
+          {(() => {
+            const lock = getTabLockInfo('1702Annual');
+            return (
+              <button
+                id="tab-1702annual-btn"
+                onClick={() => handleSelectTab('1702Annual')}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
+                  lock.locked
+                    ? 'opacity-40 cursor-not-allowed bg-slate-100 text-slate-400 border border-slate-200 shadow-none'
+                    : activeTab === '1702Annual'
+                    ? 'bg-indigo-700 text-white shadow-xs'
+                    : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
+                }`}
+                title={lock.locked ? lock.reason : 'Open BIR Form 1702-RT (Annual ITR for Corporations)'}
+              >
+                {lock.locked ? <Lock className="w-3.5 h-3.5 text-slate-400" /> : <FileCheck className="w-3.5 h-3.5 text-indigo-500" />}
+                <span>1702-RT (Annual)</span>
+                {lock.locked ? (
+                  <span className="text-[10px] px-1.5 py-0.2 bg-slate-200/80 text-slate-600 rounded font-mono font-medium">
+                    Locked
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-normal opacity-80 hidden sm:inline">(Corporate)</span>
+                )}
+              </button>
+            );
+          })()}
         </div>
 
         {/* Locked Tab Notification Alert */}
@@ -804,6 +1635,8 @@ export default function App() {
                 data2551Q={current2551Q}
                 data1601C={current1601C}
                 data1601EQ={current1601EQ}
+                data1701Annual={raw1701Annual}
+                data1702Annual={raw1702Annual}
                 onOpenCalendar={() => setActiveTab('calendar')}
                 onNavigateToTab={(tab) => handleSelectTab(tab)}
                 submittedStatusMap={submittedReturns}
@@ -828,11 +1661,11 @@ export default function App() {
                 quarter={quarter}
                 year={year}
                 data={current1701Q}
+                salesSourceInfo={salesSourceInfo}
                 onChange={(updated) =>
                   setData1701QMap((prev) => ({
                     ...prev,
                     [currentQuarterKey]: updated,
-                    [activeClient.id]: updated,
                   }))
                 }
               />
@@ -844,11 +1677,11 @@ export default function App() {
                 quarter={quarter}
                 year={year}
                 data={current1702Q}
+                salesSourceInfo={salesSourceInfo}
                 onChange={(updated) =>
                   setData1702QMap((prev) => ({
                     ...prev,
                     [currentQuarterKey]: updated,
-                    [activeClient.id]: updated,
                   }))
                 }
               />
@@ -864,7 +1697,6 @@ export default function App() {
                   setData2550QMap((prev) => ({
                     ...prev,
                     [currentQuarterKey]: updated,
-                    [activeClient.id]: updated,
                   }))
                 }
               />
@@ -880,7 +1712,6 @@ export default function App() {
                   setData2551QMap((prev) => ({
                     ...prev,
                     [currentQuarterKey]: updated,
-                    [activeClient.id]: updated,
                   }))
                 }
               />
@@ -892,11 +1723,12 @@ export default function App() {
                 month={month}
                 year={year}
                 data={current1601C}
+                onSelectMonth={setMonth}
+                yearlyData={yearly1601CData}
                 onChange={(updated) =>
                   setData1601CMap((prev) => ({
                     ...prev,
                     [currentMonthKey]: updated,
-                    [activeClient.id]: updated,
                   }))
                 }
               />
@@ -905,15 +1737,60 @@ export default function App() {
             {activeTab === '1601EQ' && activeClient && (
               <Form1601EQView
                 client={activeClient}
-                periodLabel={current1601EQ.isMonthly ? `Month ${month}, ${year}` : `${quarter} ${year}`}
+                periodLabel={
+                  ewtPeriodMode === 'quarter'
+                    ? `${quarter} ${year} (Quarterly 1601-EQ)`
+                    : `Month ${ewtPeriodMode === 'm1' ? m1Num : ewtPeriodMode === 'm2' ? m2Num : m3Num}, ${year} (Monthly 0619-E)`
+                }
                 data={current1601EQ}
+                quarter={quarter}
+                month={month}
+                year={year}
+                activePeriodMode={ewtPeriodMode}
+                onSelectPeriodMode={setEwtPeriodMode}
+                month1Data={month1Data}
+                month2Data={month2Data}
+                month3Data={month3Data}
+                quarterCombinedData={quarterCombinedData}
+                yearlyData={yearly1601EQData}
+                onConsolidateMonths={handleConsolidateMonths}
+                onChange={handleUpdate1601EQ}
+              />
+            )}
+
+            {(activeTab === '1701Annual' || (activeTab === 'annual' && isSingle)) && activeClient && (
+              <Form1701AnnualView
+                client={activeClient}
+                year={year}
+                data={raw1701Annual}
                 onChange={(updated) =>
-                  setData1601EQMap((prev) => ({
+                  setData1701AnnualMap((prev) => ({
                     ...prev,
-                    [currentQuarterKey]: updated,
-                    [activeClient.id]: updated,
+                    [currentAnnualKey]: updated,
                   }))
                 }
+                onAutoPullQuarters={handleAutoPull1701Quarters}
+                quartersDataSummary={quarters1701Summary}
+                allYearsData={allYears1701Data}
+                onUpdateHistoricalYear={handleUpdateHistorical1701Year}
+              />
+            )}
+
+            {(activeTab === '1702Annual' || (activeTab === 'annual' && !isSingle)) && activeClient && (
+              <Form1702AnnualView
+                client={activeClient}
+                year={year}
+                data={raw1702Annual}
+                onChange={(updated) =>
+                  setData1702AnnualMap((prev) => ({
+                    ...prev,
+                    [currentAnnualKey]: updated,
+                  }))
+                }
+                onAutoPullQuarters={handleAutoPull1702Quarters}
+                quartersDataSummary={quarters1702Summary}
+                allYearsData={allYears1702Data}
+                onUpdateHistoricalYear={handleUpdateHistorical1702Year}
               />
             )}
           </>
@@ -1055,6 +1932,9 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* PWA Offline Status Indicator */}
+      <OfflineIndicator />
     </div>
   );
 }

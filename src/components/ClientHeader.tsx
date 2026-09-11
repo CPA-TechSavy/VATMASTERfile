@@ -15,10 +15,12 @@ import {
   Trash2,
   RotateCcw,
 } from 'lucide-react';
+import { InstallButton } from './InstallButton';
 
 interface ClientHeaderProps {
   clients: ClientProfile[];
   activeClient: ClientProfile | null;
+  activeTab?: string;
   onSelectClient: (client: ClientProfile) => void;
   onOpenAddClient: () => void;
   onOpenEditClient: () => void;
@@ -63,9 +65,23 @@ function getClassificationBadge(c: TaxClassification) {
   }
 }
 
+function getMonthsForQuarter(q: Quarter): [number, number, number] {
+  switch (q) {
+    case 'Q1':
+      return [1, 2, 3];
+    case 'Q2':
+      return [4, 5, 6];
+    case 'Q3':
+      return [7, 8, 9];
+    case 'Q4':
+      return [10, 11, 12];
+  }
+}
+
 export const ClientHeader: React.FC<ClientHeaderProps> = ({
   clients,
   activeClient,
+  activeTab,
   onSelectClient,
   onOpenAddClient,
   onOpenEditClient,
@@ -164,49 +180,133 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
               ))}
             </select>
 
-            {/* Quarter Selector */}
-            <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs font-medium">
-              {QUARTERS.map((q) => {
-                const isCurrentRealQ = q === realTimePeriod.quarter && year === realTimePeriod.year;
-                return (
-                  <button
-                    key={q}
-                    id={`quarter-btn-${q}`}
-                    onClick={() => onSelectQuarter(q)}
-                    className={`relative px-2 py-1 rounded-md transition-colors ${
-                      quarter === q
-                        ? 'bg-slate-900 text-white shadow-xs font-semibold'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                    title={isCurrentRealQ ? `${q} (Real-time current quarter)` : q}
-                  >
-                    {q}
-                    {isCurrentRealQ && (
-                      <span
-                        className={`absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full ${
-                          quarter === q ? 'bg-emerald-400 ring-1 ring-slate-900' : 'bg-emerald-500'
+            {/* Context-aware Period Selector based on Active Form Tab */}
+            {activeTab === 'annual' ? (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 border border-indigo-200 rounded-lg text-xs font-semibold text-indigo-700">
+                <Calendar className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Annual Taxable Year (Jan 1 - Dec 31)</span>
+              </div>
+            ) : activeTab === '1601C' ? (
+              /* For 1601C: strictly monthly return, reflecting all 12 Months */
+              <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs font-medium overflow-x-auto max-w-full">
+                <span className="text-[10px] uppercase font-bold text-slate-400 px-1.5 hidden md:inline">
+                  Month:
+                </span>
+                {MONTHS.map((m) => {
+                  const isCurrentRealM = m.val === realTimePeriod.month && year === realTimePeriod.year;
+                  return (
+                    <button
+                      key={m.val}
+                      id={`header-1601c-month-${m.val}`}
+                      onClick={() => onSelectMonth(m.val)}
+                      className={`relative px-2 py-1 rounded-md transition-colors whitespace-nowrap ${
+                        month === m.val
+                          ? 'bg-emerald-600 text-white shadow-xs font-semibold'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                      title={`${m.label} (Month ${m.val})`}
+                    >
+                      {m.label}
+                      {isCurrentRealM && (
+                        <span
+                          className={`absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full ${
+                            month === m.val ? 'bg-emerald-300 ring-1 ring-slate-900' : 'bg-emerald-500'
+                          }`}
+                        />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : activeTab === '1601EQ' ? (
+              /* For 1601EQ / 0619E: Monthly & Quarterly Combine */
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {/* Quarter Switcher */}
+                <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs font-medium">
+                  {QUARTERS.map((q) => {
+                    const isCurrentRealQ = q === realTimePeriod.quarter && year === realTimePeriod.year;
+                    return (
+                      <button
+                        key={q}
+                        id={`quarter-btn-${q}`}
+                        onClick={() => onSelectQuarter(q)}
+                        className={`relative px-2 py-1 rounded-md transition-colors ${
+                          quarter === q
+                            ? 'bg-slate-900 text-white shadow-xs font-semibold'
+                            : 'text-slate-600 hover:text-slate-900'
                         }`}
-                        title="Real-time quarter"
-                      />
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+                        title={q}
+                      >
+                        {q}
+                        {isCurrentRealQ && (
+                          <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
 
-            {/* Month Selector for 1601C / 0619E */}
-            <select
-              id="tax-month-select"
-              value={month}
-              onChange={(e) => onSelectMonth(parseInt(e.target.value))}
-              className="px-2 py-1.5 text-xs font-medium bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-            >
-              {MONTHS.map((m) => (
-                <option key={m.val} value={m.val}>
-                  {m.label} (Mo. {m.val})
-                </option>
-              ))}
-            </select>
+                {/* Months of active quarter */}
+                <div className="flex items-center gap-1 bg-teal-50/80 p-0.5 rounded-lg border border-teal-200 text-xs">
+                  {getMonthsForQuarter(quarter).map((mNum, idx) => {
+                    const isQEnd = idx === 2;
+                    const mObj = MONTHS[mNum - 1];
+                    const isSelectedMonth = month === mNum;
+                    return (
+                      <button
+                        key={mNum}
+                        id={`header-ewt-month-${mNum}`}
+                        onClick={() => onSelectMonth(mNum)}
+                        className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                          isSelectedMonth
+                            ? 'bg-teal-700 text-white font-semibold shadow-xs'
+                            : 'text-teal-800 hover:bg-teal-100'
+                        }`}
+                        title={
+                          isQEnd
+                            ? `${mObj.label}: Month 3 (Quarterly Close 1601-EQ)`
+                            : `${mObj.label}: Month ${idx + 1} (Form 0619-E Monthly Remittance)`
+                        }
+                      >
+                        {mObj.label} {isQEnd ? '(1601-EQ)' : '(0619-E)'}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              /* Standard Quarterly Returns (1701Q, 1702Q, 2550Q, 2551Q, summary) */
+              <div className="flex items-center gap-2">
+                <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs font-medium">
+                  {QUARTERS.map((q) => {
+                    const isCurrentRealQ = q === realTimePeriod.quarter && year === realTimePeriod.year;
+                    return (
+                      <button
+                        key={q}
+                        id={`quarter-btn-${q}`}
+                        onClick={() => onSelectQuarter(q)}
+                        className={`relative px-2 py-1 rounded-md transition-colors ${
+                          quarter === q
+                            ? 'bg-slate-900 text-white shadow-xs font-semibold'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                        title={isCurrentRealQ ? `${q} (Real-time current quarter)` : q}
+                      >
+                        {q}
+                        {isCurrentRealQ && (
+                          <span
+                            className={`absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full ${
+                              quarter === q ? 'bg-emerald-400 ring-1 ring-slate-900' : 'bg-emerald-500'
+                            }`}
+                            title="Real-time quarter"
+                          />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {onOpenCalendar && (
               <button
@@ -219,6 +319,9 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
                 <span className="hidden sm:inline">Deadlines</span>
               </button>
             )}
+
+            {/* PC Download / Install PWA Button */}
+            <InstallButton />
 
             {/* Backup / Export */}
             <div className="flex items-center gap-1 border-l border-slate-200 pl-2">

@@ -7,6 +7,8 @@ import {
   Data2551Q,
   Data1601C,
   Data1601EQ,
+  Data1701Annual,
+  Data1702Annual,
   Quarter,
 } from '../types/tax';
 import {
@@ -16,6 +18,8 @@ import {
   calculate2551Q,
   calculate1601C,
   calculate1601EQ,
+  calculate1701Annual,
+  calculate1702Annual,
 } from '../utils/taxCalculations';
 import { formatPHP } from '../utils/formatters';
 import {
@@ -41,15 +45,17 @@ interface FilingSummaryViewProps {
   data2551Q?: Data2551Q;
   data1601C?: Data1601C;
   data1601EQ?: Data1601EQ;
+  data1701Annual?: Data1701Annual;
+  data1702Annual?: Data1702Annual;
   onOpenCalendar?: () => void;
-  onNavigateToTab?: (tab: '1701Q' | '1702Q' | '2550Q' | '2551Q' | '1601C' | '1601EQ') => void;
+  onNavigateToTab?: (tab: '1701Q' | '1702Q' | '2550Q' | '2551Q' | '1601C' | '1601EQ' | '1701Annual' | '1702Annual') => void;
   submittedStatusMap?: Record<string, boolean>;
   onToggleSubmission?: (key: string) => void;
 }
 
 export interface RequiredBirFormItem {
   idKey: string;
-  tabKey: '1701Q' | '1702Q' | '2550Q' | '2551Q' | '1601C' | '1601EQ';
+  tabKey: '1701Q' | '1702Q' | '2550Q' | '2551Q' | '1601C' | '1601EQ' | '1701Annual' | '1702Annual';
   formCode: string;
   formName: string;
   description: string;
@@ -139,6 +145,8 @@ export const FilingSummaryView: React.FC<FilingSummaryViewProps> = ({
   data2551Q,
   data1601C,
   data1601EQ,
+  data1701Annual,
+  data1702Annual,
   onOpenCalendar,
   onNavigateToTab,
   submittedStatusMap = {},
@@ -159,6 +167,8 @@ export const FilingSummaryView: React.FC<FilingSummaryViewProps> = ({
   const res2551Q = data2551Q ? calculate2551Q(data2551Q) : null;
   const res1601C = data1601C ? calculate1601C(data1601C) : null;
   const res1601EQ = data1601EQ ? calculate1601EQ(data1601EQ) : null;
+  const res1701Annual = data1701Annual ? calculate1701Annual(data1701Annual) : null;
+  const res1702Annual = data1702Annual ? calculate1702Annual(data1702Annual) : null;
 
   // Month Names
   const monthNames = [
@@ -280,6 +290,41 @@ export const FilingSummaryView: React.FC<FilingSummaryViewProps> = ({
     });
   }
 
+  // Annual Income Tax Return (Form 1701 for Individuals/Single or Form 1702-RT for Corporations)
+  if (isSingle) {
+    const idKeyAnnual = `${client.id}_${year}_1701Annual`;
+    requiredForms.push({
+      idKey: idKeyAnnual,
+      tabKey: '1701Annual',
+      formCode: 'BIR Form 1701 / 1701A',
+      formName: 'Annual Income Tax Return for Individuals (Single / Self-Employed)',
+      description: 'Annual ITR with Graduated or 8% Flat Rate Option (Consolidates Q1-Q4)',
+      filingPeriodStatus: `Taxable Year ${year} (Annual)`,
+      dueDate: `April 15, ${year + 1}`,
+      netPayable: res1701Annual ? Math.max(0, res1701Annual.netTaxPayable) : 0,
+      taxBase: res1701Annual?.netTaxableIncome || 0,
+      taxDue: res1701Annual?.taxDue || 0,
+      credits: res1701Annual?.totalTaxCredits || 0,
+      isSubmitted: !!submittedStatusMap[idKeyAnnual],
+    });
+  } else if (isCorpOrPartnership) {
+    const idKeyAnnual = `${client.id}_${year}_1702Annual`;
+    requiredForms.push({
+      idKey: idKeyAnnual,
+      tabKey: '1702Annual',
+      formCode: 'BIR Form 1702-RT',
+      formName: 'Annual Income Tax Return for Corporations and Partnerships',
+      description: `Annual Corporate ITR (${res1702Annual?.appliedTaxType || 'Regular Rate / MCIT'} - Consolidates Q1-Q4)`,
+      filingPeriodStatus: `Taxable Year ${year} (Annual)`,
+      dueDate: `April 15, ${year + 1}`,
+      netPayable: res1702Annual ? Math.max(0, res1702Annual.netTaxPayable) : 0,
+      taxBase: res1702Annual?.netTaxableIncome || 0,
+      taxDue: res1702Annual?.taxDue || 0,
+      credits: res1702Annual?.totalTaxCredits || 0,
+      isSubmitted: !!submittedStatusMap[idKeyAnnual],
+    });
+  }
+
   // 2. List of BIR Forms NOT NEEDED / LOCKED for this Client
   const lockedForms: LockedBirFormItem[] = [];
 
@@ -290,11 +335,23 @@ export const FilingSummaryView: React.FC<FilingSummaryViewProps> = ({
       reason: `Client is registered as "${client.classification}" (Individual). Files Form 1701Q instead.`,
       lockedInTab: true,
     });
+    lockedForms.push({
+      formCode: 'BIR Form 1702-RT (Annual)',
+      formName: 'Corporate Annual Income Tax Return',
+      reason: `Client is registered as "${client.classification}" (Individual). Files Form 1701 (Annual) instead.`,
+      lockedInTab: true,
+    });
   } else {
     lockedForms.push({
       formCode: 'BIR Form 1701Q',
       formName: 'Individual Quarterly Income Tax',
       reason: `Client is registered as "${client.classification}" (Juridical Entity). Files Form 1702Q instead.`,
+      lockedInTab: true,
+    });
+    lockedForms.push({
+      formCode: 'BIR Form 1701 (Annual)',
+      formName: 'Individual Annual Income Tax Return',
+      reason: `Client is registered as "${client.classification}" (Juridical Entity). Files Form 1702-RT (Annual) instead.`,
       lockedInTab: true,
     });
   }

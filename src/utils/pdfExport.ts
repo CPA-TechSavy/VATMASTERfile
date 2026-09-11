@@ -1,8 +1,8 @@
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
-import { ClientProfile, Quarter, Data2550Q } from '../types/tax';
+import { ClientProfile, Quarter, Data2550Q, Data1702Annual, Data1701Annual } from '../types/tax';
 import { ClientBranchSchedule, PurchasesReportingMode, BirUploadedFileRecord, BirTransactionRow } from '../types/branchVat';
-import { calculate2550Q, Result2550Q, computeMonthlyQuarterBreakdown } from './taxCalculations';
+import { calculate2550Q, Result2550Q, computeMonthlyQuarterBreakdown, computeGraduatedTax } from './taxCalculations';
 import { DeferredClientRecord, QuarterlyDeferralDetail } from './deferralTracker';
 
 interface PdfExportOptions {
@@ -1735,4 +1735,535 @@ export async function exportDeferredClientsListPdf(options: DeferredPdfExportOpt
     }
   }
 }
+
+export interface ComparativeVariancePdfOptions {
+  client?: ClientProfile;
+  currentYear: number;
+  selectedPriorYear?: number;
+  currentData: Data1702Annual | Data1701Annual;
+  allYearsData?: Record<number, Data1702Annual | Data1701Annual>;
+  formType?: '1701' | '1702';
+}
+
+interface MetricSet {
+  year: number;
+  grossSales: number;
+  salesReturns: number;
+  netSales: number;
+  costOfSales: number;
+  grossProfit: number;
+  nonOperating: number;
+  totalGrossIncome: number;
+  deductions: number;
+  netTaxableIncome: number;
+  taxRatePercent: number;
+  taxDue: number;
+  netIncomeAfterTax: number;
+  grossMarginPct: number;
+  opExpenseRatioPct: number;
+  effectiveTaxRatePct: number;
+  netMarginPct: number;
+}
+
+function computeMetricsForPdf(
+  year: number,
+  data?: Data1702Annual | Data1701Annual,
+  formType?: '1701' | '1702'
+): MetricSet {
+  const grossSales = Number(data?.grossSales) || 0;
+  const salesReturns = Number((data as any)?.salesReturnsDiscounts) || 0;
+  const netSales = Math.max(0, grossSales - salesReturns);
+  const costOfSales = Number(data?.costOfSales) || 0;
+  const grossProfit = Math.max(0, netSales - costOfSales);
+  const nonOperating = Number(data?.nonOperatingIncome) || 0;
+  const is1701 = formType === '1701' || (data && 'taxRegime' in data);
+
+  let deductions = 0;
+  let taxDue = 0;
+  let netTaxableIncome = 0;
+  let ratePercent = 0;
+
+  if (is1701) {
+    const d1701 = data as Data1701Annual;
+    const totalGross = netSales + nonOperating;
+    if (d1701?.taxRegime === '8_percent') {
+      deductions = d1701?.taxpayerType === 'pure_business' ? 250000 : 0;
+      netTaxableIncome = Math.max(0, totalGross - deductions);
+      taxDue = netTaxableIncome * 0.08;
+      ratePercent = 8;
+    } else {
+      if (d1701?.deductionMethod === 'osd') {
+        deductions = netSales * 0.40;
+        netTaxableIncome = Math.max(0, totalGross - deductions);
+      } else {
+        deductions = Number(d1701?.operatingExpenses) || 0;
+        netTaxableIncome = Math.max(0, grossProfit + nonOperating - deductions);
+      }
+      taxDue = computeGraduatedTax(netTaxableIncome);
+      ratePercent = netTaxableIncome > 0 ? (taxDue / netTaxableIncome) * 100 : 0;
+    }
+  } else {
+    const d1702 = data as Data1702Annual;
+    const totalGrossIncome = grossProfit + nonOperating;
+    deductions = Number(d1702?.operatingExpenses) || 0;
+    if (d1702?.deductionMethod === 'osd') {
+      deductions = totalGrossIncome * 0.40;
+    }
+    netTaxableIncome = Math.max(0, totalGrossIncome - deductions);
+    const rate = d1702?.rateOption === 'msme_20' ? 0.20 : 0.25;
+    const ncit = netTaxableIncome * rate;
+    const mcit = d1702?.isMCOptional ? totalGrossIncome * 0.02 : 0;
+    taxDue = Math.max(ncit, mcit);
+    ratePercent = rate * 100;
+  }
+
+  const netIncomeAfterTax = Math.max(0, netTaxableIncome - taxDue);
+  const grossMarginPct = netSales > 0 ? (grossProfit / netSales) * 100 : 0;
+  const opExpenseRatioPct = netSales > 0 ? (deductions / netSales) * 100 : 0;
+  const effectiveTaxRatePct = netTaxableIncome > 0 ? (taxDue / netTaxableIncome) * 100 : 0;
+  const netMarginPct = netSales > 0 ? (netIncomeAfterTax / netSales) * 100 : 0;
+
+  return {
+    year,
+    grossSales,
+    salesReturns,
+    netSales,
+    costOfSales,
+    grossProfit,
+    nonOperating,
+    totalGrossIncome: is1701 ? netSales + nonOperating : grossProfit + nonOperating,
+    deductions,
+    netTaxableIncome,
+    taxRatePercent: ratePercent,
+    taxDue,
+    netIncomeAfterTax,
+    grossMarginPct,
+    opExpenseRatioPct,
+    effectiveTaxRatePct,
+    netMarginPct,
+  };
+}
+
+export async function exportComparativeVariancePdf({
+  client,
+  currentYear,
+  selectedPriorYear = currentYear - 1,
+  currentData,
+  allYearsData = {},
+  formType,
+}: ComparativeVariancePdfOptions): Promise<void> {
+  const container = document.createElement('div');
+  container.style.position = 'fixed';
+  container.style.left = '-9999px';
+  container.style.top = '0';
+  container.style.width = '1120px';
+  container.style.backgroundColor = '#ffffff';
+  container.style.zIndex = '-1000';
+  container.style.fontFamily = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+
+  const is1701 = formType === '1701' || (currentData && 'taxRegime' in currentData);
+
+  // Compute metrics for prior 3 years and current year
+  const priorYears = [currentYear - 3, currentYear - 2, currentYear - 1];
+  const metricsMap: Record<number, MetricSet> = {};
+
+  priorYears.forEach((y) => {
+    metricsMap[y] = computeMetricsForPdf(y, allYearsData[y], is1701 ? '1701' : '1702');
+  });
+  metricsMap[currentYear] = computeMetricsForPdf(currentYear, currentData, is1701 ? '1701' : '1702');
+
+  const curr = metricsMap[currentYear];
+  const selPrior = metricsMap[selectedPriorYear] || metricsMap[currentYear - 1];
+  const baseYear = currentYear - 3;
+  const base = metricsMap[baseYear];
+
+  // Helper for variance calculation
+  const calcVar = (currVal: number, priorVal: number) => {
+    const diff = currVal - priorVal;
+    const pct = priorVal !== 0 ? (diff / Math.abs(priorVal)) * 100 : 0;
+    return { diff, pct };
+  };
+
+  const salesVar = calcVar(curr.grossSales, selPrior.grossSales);
+  const netSalesVar = calcVar(curr.netSales, selPrior.netSales);
+  const costVar = calcVar(curr.costOfSales, selPrior.costOfSales);
+  const gpVar = calcVar(curr.grossProfit, selPrior.grossProfit);
+  const dedVar = calcVar(curr.deductions, selPrior.deductions);
+  const ntiVar = calcVar(curr.netTaxableIncome, selPrior.netTaxableIncome);
+  const taxVar = calcVar(curr.taxDue, selPrior.taxDue);
+  const netIncVar = calcVar(curr.netIncomeAfterTax, selPrior.netIncomeAfterTax);
+
+  // Cumulative vs Base Year
+  const netSalesCum = calcVar(curr.netSales, base.netSales);
+  const gpCum = calcVar(curr.grossProfit, base.grossProfit);
+  const ntiCum = calcVar(curr.netTaxableIncome, base.netTaxableIncome);
+  const taxCum = calcVar(curr.taxDue, base.taxDue);
+  const netIncCum = calcVar(curr.netIncomeAfterTax, base.netIncomeAfterTax);
+
+  const formatDiffCol = (diff: number, isCost = false) => {
+    const isGood = isCost ? diff <= 0 : diff >= 0;
+    const color = isGood ? '#047857' : '#b91c1c';
+    const sign = diff >= 0 ? '+' : '-';
+    return `<span style="font-family: monospace; font-weight: 700; color: ${color};">${sign}${formatPdfCurrency(Math.abs(diff))}</span>`;
+  };
+
+  const formatPctCol = (pct: number, isCost = false) => {
+    if (!isFinite(pct) || isNaN(pct)) return '<span style="color: #94a3b8;">—</span>';
+    const isGood = isCost ? pct <= 0 : pct >= 0;
+    const bg = isGood ? '#ecfdf5' : '#fff1f2';
+    const color = isGood ? '#065f46' : '#9f1239';
+    const sign = pct >= 0 ? '+' : '';
+    return `<span style="display: inline-block; padding: 1px 5px; border-radius: 4px; font-family: monospace; font-size: 9px; font-weight: 700; background-color: ${bg}; color: ${color};">${sign}${pct.toFixed(1)}%</span>`;
+  };
+
+  const cleanCompName = (client?.registeredName || client?.tradeName || 'Taxpayer')
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, '_')
+    .replace(/_+/g, '_');
+
+  const reportDate = new Date().toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+
+  container.innerHTML = `
+    <div id="pdf-variance-statement-page" style="width: 1120px; min-height: 792px; padding: 22px 30px; background-color: #ffffff; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between;">
+      <div>
+        <!-- Official BIR Comparative Header -->
+        <div style="border-bottom: 2px solid #0f172a; padding-bottom: 8px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: flex-start;">
+          <div>
+            <div style="font-size: 9.5px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: #475569;">
+              ${is1701 ? 'Republic of the Philippines • Bureau of Internal Revenue • Form 1701 (Individuals & Sole Proprietors)' : 'Republic of the Philippines • Bureau of Internal Revenue • Form 1702-RT (Corporations)'}
+            </div>
+            <div style="font-size: 17px; font-weight: 900; color: #0f172a; margin-top: 1px; letter-spacing: -0.01em;">
+              ${client?.registeredName || client?.tradeName || (is1701 ? 'INDIVIDUAL TAXPAYER' : 'CORPORATE TAXPAYER')}
+            </div>
+            <div style="font-size: 10.5px; font-weight: 600; color: #1e40af; margin-top: 1px;">
+              STATEMENT OF COMPREHENSIVE INCOME & MULTI-YEAR TAX VARIANCE ANALYSIS
+            </div>
+            <div style="font-size: 9px; color: #64748b; margin-top: 1px;">
+              TIN: <strong style="color: #0f172a; font-family: monospace;">${client?.tin || '000-000-000-000'}</strong> • 
+              RDO: <strong style="color: #0f172a;">${client?.rdo || '043'}</strong> • 
+              Classification: <strong style="color: #0f172a;">${client?.classification || (is1701 ? 'Individual' : 'Corporation (Regular)')}</strong> • 
+              Tax Regime: <strong style="color: #047857;">${is1701 ? ((currentData as Data1701Annual).taxRegime === '8_percent' ? '8% Flat Rate (TRAIN Act)' : 'Graduated Tax Rates (TRAIN / EOPT Act)') : ((currentData as Data1702Annual).rateOption === 'msme_20' ? 'MSME 20% (CREATE Act)' : 'Regular Corporate 25% (CREATE Act)')}</strong>
+            </div>
+          </div>
+          <div style="text-align: right; background: linear-gradient(135deg, #f8fafc 0%, #eff6ff 100%); border: 1px solid #bfdbfe; border-radius: 8px; padding: 6px 14px;">
+            <div style="font-size: 9px; font-weight: 700; text-transform: uppercase; color: #1e3a8a; letter-spacing: 0.05em;">Current Taxable Year</div>
+            <div style="font-size: 16px; font-weight: 900; color: #1e1b4b;">TY ${currentYear}</div>
+            <div style="font-size: 8.5px; color: #475569;">Benchmark Period: TY ${baseYear} - TY ${currentYear}</div>
+            <div style="font-size: 8.5px; color: #0284c7; font-weight: 600; margin-top: 1px;">Primary Focus: TY ${selectedPriorYear} vs. TY ${currentYear}</div>
+          </div>
+        </div>
+
+        <!-- 4 Summary KPI Variance Cards -->
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px;">
+          <!-- Card 1: Net Sales -->
+          <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 10px;">
+            <div style="font-size: 8.5px; font-weight: 700; text-transform: uppercase; color: #64748b;">TY ${currentYear} Net Sales</div>
+            <div style="font-size: 13.5px; font-weight: 800; font-family: monospace; color: #0f172a; margin-top: 1px;">
+              ${formatPdfCurrency(curr.netSales)}
+            </div>
+            <div style="font-size: 8.5px; color: #475569; margin-top: 2px; display: flex; justify-content: space-between;">
+              <span>vs TY ${selectedPriorYear}:</span>
+              <span>${formatDiffCol(netSalesVar.diff)} (${netSalesVar.pct >= 0 ? '+' : ''}${netSalesVar.pct.toFixed(1)}%)</span>
+            </div>
+          </div>
+
+          <!-- Card 2: Gross Profit -->
+          <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 10px;">
+            <div style="font-size: 8.5px; font-weight: 700; text-transform: uppercase; color: #64748b;">TY ${currentYear} Gross Profit</div>
+            <div style="font-size: 13.5px; font-weight: 800; font-family: monospace; color: #1e3a8a; margin-top: 1px;">
+              ${formatPdfCurrency(curr.grossProfit)}
+            </div>
+            <div style="font-size: 8.5px; color: #475569; margin-top: 2px; display: flex; justify-content: space-between;">
+              <span>Margin: <strong>${curr.grossMarginPct.toFixed(1)}%</strong></span>
+              <span>${formatDiffCol(gpVar.diff)} (${gpVar.pct >= 0 ? '+' : ''}${gpVar.pct.toFixed(1)}%)</span>
+            </div>
+          </div>
+
+          <!-- Card 3: Net Taxable Income -->
+          <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 10px;">
+            <div style="font-size: 8.5px; font-weight: 700; text-transform: uppercase; color: #64748b;">TY ${currentYear} Taxable Income</div>
+            <div style="font-size: 13.5px; font-weight: 800; font-family: monospace; color: #0f172a; margin-top: 1px;">
+              ${formatPdfCurrency(curr.netTaxableIncome)}
+            </div>
+            <div style="font-size: 8.5px; color: #475569; margin-top: 2px; display: flex; justify-content: space-between;">
+              <span>vs TY ${selectedPriorYear}:</span>
+              <span>${formatDiffCol(ntiVar.diff)} (${ntiVar.pct >= 0 ? '+' : ''}${ntiVar.pct.toFixed(1)}%)</span>
+            </div>
+          </div>
+
+          <!-- Card 4: Corporate Tax Due -->
+          <div style="background-color: #f5f3ff; border: 1px solid #ddd6fe; border-radius: 6px; padding: 8px 10px;">
+            <div style="font-size: 8.5px; font-weight: 700; text-transform: uppercase; color: #6b21a8;">TY ${currentYear} Tax Provision</div>
+            <div style="font-size: 13.5px; font-weight: 900; font-family: monospace; color: #4c1d95; margin-top: 1px;">
+              ${formatPdfCurrency(curr.taxDue)}
+            </div>
+            <div style="font-size: 8.5px; color: #581c87; margin-top: 2px; display: flex; justify-content: space-between;">
+              <span>Effective: <strong>${curr.effectiveTaxRatePct.toFixed(1)}%</strong></span>
+              <span>${taxVar.diff >= 0 ? '+' : ''}${formatPdfCurrency(taxVar.diff)} (${taxVar.pct >= 0 ? '+' : ''}${taxVar.pct.toFixed(1)}%)</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Comprehensive Multi-Year Variance Matrix Table (Without CUM VAR and CUM %) -->
+        <div style="border: 1px solid #cbd5e1; border-radius: 6px; overflow: hidden; margin-bottom: 10px;">
+          <table style="width: 100%; border-collapse: collapse; font-size: 9.5px;">
+            <thead>
+              <tr style="background-color: #0f172a; color: #ffffff; text-transform: uppercase; font-size: 8.5px; letter-spacing: 0.04em;">
+                <th style="padding: 6px 10px; text-align: left; width: 32%;">Statement Account / Return Line Item</th>
+                <th style="padding: 6px 8px; text-align: right; font-family: monospace; width: 11%;">TY ${baseYear}</th>
+                <th style="padding: 6px 8px; text-align: right; font-family: monospace; width: 11%;">TY ${currentYear - 2}</th>
+                <th style="padding: 6px 8px; text-align: right; font-family: monospace; width: 12%; background-color: #1e293b;">TY ${selectedPriorYear}</th>
+                <th style="padding: 6px 8px; text-align: right; font-family: monospace; width: 14%; background-color: #1e3a8a; color: #eff6ff; font-weight: 800;">TY ${currentYear} (Current)</th>
+                <th style="padding: 6px 8px; text-align: right; font-family: monospace; width: 12%; background-color: #0f172a;">YoY Var (₱)</th>
+                <th style="padding: 6px 8px; text-align: right; font-family: monospace; width: 8%; background-color: #0f172a;">YoY %</th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- Gross Sales -->
+              <tr style="border-bottom: 1px solid #f1f5f9; background-color: #ffffff;">
+                <td style="padding: 4px 10px; font-weight: 700; color: #1e293b;">Gross Sales / Revenues / Receipts</td>
+                <td style="padding: 4px 8px; text-align: right; font-family: monospace; color: #475569;">${formatPdfCurrency(base.grossSales)}</td>
+                <td style="padding: 4px 8px; text-align: right; font-family: monospace; color: #475569;">${formatPdfCurrency(metricsMap[currentYear - 2].grossSales)}</td>
+                <td style="padding: 4px 8px; text-align: right; font-family: monospace; color: #1e293b; background-color: #f8fafc;">${formatPdfCurrency(selPrior.grossSales)}</td>
+                <td style="padding: 4px 8px; text-align: right; font-family: monospace; font-weight: 800; color: #0f172a; background-color: #eff6ff;">${formatPdfCurrency(curr.grossSales)}</td>
+                <td style="padding: 4px 8px; text-align: right;">${formatDiffCol(salesVar.diff)}</td>
+                <td style="padding: 4px 8px; text-align: right;">${formatPctCol(salesVar.pct)}</td>
+              </tr>
+
+              <!-- Sales Returns -->
+              <tr style="border-bottom: 1px solid #f1f5f9; color: #64748b; font-size: 8.5px;">
+                <td style="padding: 3px 10px; padding-left: 18px;">Less: Sales Returns & Discounts</td>
+                <td style="padding: 3px 8px; text-align: right; font-family: monospace;">(${formatPdfCurrency(base.salesReturns, false)})</td>
+                <td style="padding: 3px 8px; text-align: right; font-family: monospace;">(${formatPdfCurrency(metricsMap[currentYear - 2].salesReturns, false)})</td>
+                <td style="padding: 3px 8px; text-align: right; font-family: monospace; background-color: #f8fafc;">(${formatPdfCurrency(selPrior.salesReturns, false)})</td>
+                <td style="padding: 3px 8px; text-align: right; font-family: monospace; background-color: #eff6ff;">(${formatPdfCurrency(curr.salesReturns, false)})</td>
+                <td style="padding: 3px 8px; text-align: right; font-family: monospace; color: #94a3b8;">—</td>
+                <td style="padding: 3px 8px; text-align: right; font-family: monospace; color: #94a3b8;">—</td>
+              </tr>
+
+              <!-- Net Sales -->
+              <tr style="border-bottom: 1px solid #e2e8f0; background-color: #f8fafc; font-weight: 700;">
+                <td style="padding: 4px 10px; color: #0f172a;">Net Sales / Revenues</td>
+                <td style="padding: 4px 8px; text-align: right; font-family: monospace; color: #334155;">${formatPdfCurrency(base.netSales)}</td>
+                <td style="padding: 4px 8px; text-align: right; font-family: monospace; color: #334155;">${formatPdfCurrency(metricsMap[currentYear - 2].netSales)}</td>
+                <td style="padding: 4px 8px; text-align: right; font-family: monospace; color: #0f172a; background-color: #f1f5f9;">${formatPdfCurrency(selPrior.netSales)}</td>
+                <td style="padding: 4px 8px; text-align: right; font-family: monospace; font-weight: 800; color: #1e3a8a; background-color: #e0f2fe;">${formatPdfCurrency(curr.netSales)}</td>
+                <td style="padding: 4px 8px; text-align: right;">${formatDiffCol(netSalesVar.diff)}</td>
+                <td style="padding: 4px 8px; text-align: right;">${formatPctCol(netSalesVar.pct)}</td>
+              </tr>
+
+              <!-- Cost of Goods Sold -->
+              <tr style="border-bottom: 1px solid #f1f5f9;">
+                <td style="padding: 4px 10px; padding-left: 18px; color: #334155;">Less: Cost of Goods Sold / Services</td>
+                <td style="padding: 4px 8px; text-align: right; font-family: monospace; color: #475569;">(${formatPdfCurrency(base.costOfSales, false)})</td>
+                <td style="padding: 4px 8px; text-align: right; font-family: monospace; color: #475569;">(${formatPdfCurrency(metricsMap[currentYear - 2].costOfSales, false)})</td>
+                <td style="padding: 4px 8px; text-align: right; font-family: monospace; color: #334155; background-color: #f8fafc;">(${formatPdfCurrency(selPrior.costOfSales, false)})</td>
+                <td style="padding: 4px 8px; text-align: right; font-family: monospace; font-weight: 700; color: #0f172a; background-color: #eff6ff;">(${formatPdfCurrency(curr.costOfSales, false)})</td>
+                <td style="padding: 4px 8px; text-align: right;">${formatDiffCol(costVar.diff, true)}</td>
+                <td style="padding: 4px 8px; text-align: right;">${formatPctCol(costVar.pct, true)}</td>
+              </tr>
+
+              <!-- Gross Profit -->
+              <tr style="border-top: 1px solid #cbd5e1; border-bottom: 1px solid #cbd5e1; background-color: #f0fdf4; font-weight: 800;">
+                <td style="padding: 5px 10px; color: #065f46;">Gross Profit (Operating Margin)</td>
+                <td style="padding: 5px 8px; text-align: right; font-family: monospace; color: #047857;">${formatPdfCurrency(base.grossProfit)}</td>
+                <td style="padding: 5px 8px; text-align: right; font-family: monospace; color: #047857;">${formatPdfCurrency(metricsMap[currentYear - 2].grossProfit)}</td>
+                <td style="padding: 5px 8px; text-align: right; font-family: monospace; color: #065f46; background-color: #dcfce7;">${formatPdfCurrency(selPrior.grossProfit)}</td>
+                <td style="padding: 5px 8px; text-align: right; font-family: monospace; font-weight: 900; color: #064e3b; background-color: #bbf7d0;">${formatPdfCurrency(curr.grossProfit)}</td>
+                <td style="padding: 5px 8px; text-align: right;">${formatDiffCol(gpVar.diff)}</td>
+                <td style="padding: 5px 8px; text-align: right;">${formatPctCol(gpVar.pct)}</td>
+              </tr>
+
+              <!-- Operating Deductions -->
+              <tr style="border-bottom: 1px solid #f1f5f9;">
+                <td style="padding: 4px 10px; padding-left: 18px; color: #334155;">Less: Allowable Deductions (Itemized / OSD)</td>
+                <td style="padding: 4px 8px; text-align: right; font-family: monospace; color: #475569;">(${formatPdfCurrency(base.deductions, false)})</td>
+                <td style="padding: 4px 8px; text-align: right; font-family: monospace; color: #475569;">(${formatPdfCurrency(metricsMap[currentYear - 2].deductions, false)})</td>
+                <td style="padding: 4px 8px; text-align: right; font-family: monospace; color: #334155; background-color: #f8fafc;">(${formatPdfCurrency(selPrior.deductions, false)})</td>
+                <td style="padding: 4px 8px; text-align: right; font-family: monospace; font-weight: 700; color: #0f172a; background-color: #eff6ff;">(${formatPdfCurrency(curr.deductions, false)})</td>
+                <td style="padding: 4px 8px; text-align: right;">${formatDiffCol(dedVar.diff, true)}</td>
+                <td style="padding: 4px 8px; text-align: right;">${formatPctCol(dedVar.pct, true)}</td>
+              </tr>
+
+              <!-- Net Taxable Income -->
+              <tr style="border-bottom: 1px solid #cbd5e1; background-color: #eff6ff; font-weight: 700;">
+                <td style="padding: 5px 10px; color: #1e3a8a;">Net Taxable Income (Tax Base)</td>
+                <td style="padding: 5px 8px; text-align: right; font-family: monospace; color: #1e40af;">${formatPdfCurrency(base.netTaxableIncome)}</td>
+                <td style="padding: 5px 8px; text-align: right; font-family: monospace; color: #1e40af;">${formatPdfCurrency(metricsMap[currentYear - 2].netTaxableIncome)}</td>
+                <td style="padding: 5px 8px; text-align: right; font-family: monospace; color: #1e3a8a; background-color: #dbeafe;">${formatPdfCurrency(selPrior.netTaxableIncome)}</td>
+                <td style="padding: 5px 8px; text-align: right; font-family: monospace; font-weight: 900; color: #172554; background-color: #bfdbfe;">${formatPdfCurrency(curr.netTaxableIncome)}</td>
+                <td style="padding: 5px 8px; text-align: right;">${formatDiffCol(ntiVar.diff)}</td>
+                <td style="padding: 5px 8px; text-align: right;">${formatPctCol(ntiVar.pct)}</td>
+              </tr>
+
+              <!-- Tax Rate Row -->
+              <tr style="border-bottom: 1px solid #f1f5f9; font-size: 8.5px; color: #64748b;">
+                <td style="padding: 2.5px 10px; padding-left: 18px;">${is1701 ? 'Effective Individual Income Tax Rate' : 'Applicable Corporate Tax Rate'}</td>
+                <td style="padding: 2.5px 8px; text-align: right; font-family: monospace;">${base.taxRatePercent.toFixed(1)}%</td>
+                <td style="padding: 2.5px 8px; text-align: right; font-family: monospace;">${metricsMap[currentYear - 2].taxRatePercent.toFixed(1)}%</td>
+                <td style="padding: 2.5px 8px; text-align: right; font-family: monospace; background-color: #f8fafc;">${selPrior.taxRatePercent.toFixed(1)}%</td>
+                <td style="padding: 2.5px 8px; text-align: right; font-family: monospace; font-weight: 700; color: #1e3a8a; background-color: #eff6ff;">${curr.taxRatePercent.toFixed(1)}%</td>
+                <td style="padding: 2.5px 8px; text-align: right; font-family: monospace; color: #94a3b8;">—</td>
+                <td style="padding: 2.5px 8px; text-align: right; font-family: monospace; color: #94a3b8;">—</td>
+              </tr>
+
+              <!-- Tax Due -->
+              <tr style="border-bottom: 1px solid #cbd5e1; background-color: #faf5ff; font-weight: 800;">
+                <td style="padding: 5px 10px; color: #581c87;">${is1701 ? 'Provision for Individual Income Tax Due' : 'Provision for Corporate Income Tax Due'}</td>
+                <td style="padding: 5px 8px; text-align: right; font-family: monospace; color: #6b21a8;">${formatPdfCurrency(base.taxDue)}</td>
+                <td style="padding: 5px 8px; text-align: right; font-family: monospace; color: #6b21a8;">${formatPdfCurrency(metricsMap[currentYear - 2].taxDue)}</td>
+                <td style="padding: 5px 8px; text-align: right; font-family: monospace; color: #581c87; background-color: #f3e8ff;">${formatPdfCurrency(selPrior.taxDue)}</td>
+                <td style="padding: 5px 8px; text-align: right; font-family: monospace; font-weight: 900; color: #3b0764; background-color: #e9d5ff;">${formatPdfCurrency(curr.taxDue)}</td>
+                <td style="padding: 5px 8px; text-align: right;">${formatDiffCol(taxVar.diff, true)}</td>
+                <td style="padding: 5px 8px; text-align: right;">${formatPctCol(taxVar.pct, true)}</td>
+              </tr>
+
+              <!-- Net Income After Tax -->
+              <tr style="border-bottom: 2px solid #0f172a; background-color: #f1f5f9; font-weight: 900;">
+                <td style="padding: 5px 10px; color: #0f172a;">Net Income After Income Tax</td>
+                <td style="padding: 5px 8px; text-align: right; font-family: monospace; color: #0f172a;">${formatPdfCurrency(base.netIncomeAfterTax)}</td>
+                <td style="padding: 5px 8px; text-align: right; font-family: monospace; color: #0f172a;">${formatPdfCurrency(metricsMap[currentYear - 2].netIncomeAfterTax)}</td>
+                <td style="padding: 5px 8px; text-align: right; font-family: monospace; color: #0f172a; background-color: #e2e8f0;">${formatPdfCurrency(selPrior.netIncomeAfterTax)}</td>
+                <td style="padding: 5px 8px; text-align: right; font-family: monospace; font-weight: 900; color: #1e3a8a; background-color: #bae6fd;">${formatPdfCurrency(curr.netIncomeAfterTax)}</td>
+                <td style="padding: 5px 8px; text-align: right;">${formatDiffCol(netIncVar.diff)}</td>
+                <td style="padding: 5px 8px; text-align: right;">${formatPctCol(netIncVar.pct)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Key Ratios & Statutory Disclosure Box -->
+        <div style="display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 12px; margin-bottom: 10px;">
+          <!-- Financial & Tax Ratios Schedule -->
+          <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 10px;">
+            <div style="font-size: 8.5px; font-weight: 800; text-transform: uppercase; color: #334155; margin-bottom: 4px;">
+              Key Financial & Tax Operating Ratios Comparison
+            </div>
+            <table style="width: 100%; border-collapse: collapse; font-size: 8.5px;">
+              <thead>
+                <tr style="border-bottom: 1px solid #cbd5e1; color: #64748b;">
+                  <th style="text-align: left; padding: 2px 0;">Financial Indicator</th>
+                  <th style="text-align: right; padding: 2px 4px;">TY ${baseYear}</th>
+                  <th style="text-align: right; padding: 2px 4px;">TY ${currentYear - 2}</th>
+                  <th style="text-align: right; padding: 2px 4px;">TY ${selectedPriorYear}</th>
+                  <th style="text-align: right; padding: 2px 4px; font-weight: 800; color: #1e3a8a;">TY ${currentYear}</th>
+                  <th style="text-align: right; padding: 2px 0;">YoY Spread</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style="border-bottom: 1px solid #e2e8f0;">
+                  <td style="padding: 2.5px 0; color: #1e293b; font-weight: 600;">Gross Profit Margin</td>
+                  <td style="text-align: right; font-family: monospace;">${base.grossMarginPct.toFixed(1)}%</td>
+                  <td style="text-align: right; font-family: monospace;">${metricsMap[currentYear - 2].grossMarginPct.toFixed(1)}%</td>
+                  <td style="text-align: right; font-family: monospace;">${selPrior.grossMarginPct.toFixed(1)}%</td>
+                  <td style="text-align: right; font-family: monospace; font-weight: 700; color: #047857;">${curr.grossMarginPct.toFixed(1)}%</td>
+                  <td style="text-align: right; font-family: monospace; font-weight: 600;">${(curr.grossMarginPct - selPrior.grossMarginPct) >= 0 ? '+' : ''}${(curr.grossMarginPct - selPrior.grossMarginPct).toFixed(1)}%</td>
+                </tr>
+                <tr style="border-bottom: 1px solid #e2e8f0;">
+                  <td style="padding: 2.5px 0; color: #1e293b; font-weight: 600;">Operating Expense Ratio</td>
+                  <td style="text-align: right; font-family: monospace;">${base.opExpenseRatioPct.toFixed(1)}%</td>
+                  <td style="text-align: right; font-family: monospace;">${metricsMap[currentYear - 2].opExpenseRatioPct.toFixed(1)}%</td>
+                  <td style="text-align: right; font-family: monospace;">${selPrior.opExpenseRatioPct.toFixed(1)}%</td>
+                  <td style="text-align: right; font-family: monospace; font-weight: 700; color: #1e293b;">${curr.opExpenseRatioPct.toFixed(1)}%</td>
+                  <td style="text-align: right; font-family: monospace; font-weight: 600;">${(curr.opExpenseRatioPct - selPrior.opExpenseRatioPct) >= 0 ? '+' : ''}${(curr.opExpenseRatioPct - selPrior.opExpenseRatioPct).toFixed(1)}%</td>
+                </tr>
+                <tr style="border-bottom: 1px solid #e2e8f0;">
+                  <td style="padding: 2.5px 0; color: #1e293b; font-weight: 600;">Effective Corporate Tax Rate</td>
+                  <td style="text-align: right; font-family: monospace;">${base.effectiveTaxRatePct.toFixed(1)}%</td>
+                  <td style="text-align: right; font-family: monospace;">${metricsMap[currentYear - 2].effectiveTaxRatePct.toFixed(1)}%</td>
+                  <td style="text-align: right; font-family: monospace;">${selPrior.effectiveTaxRatePct.toFixed(1)}%</td>
+                  <td style="text-align: right; font-family: monospace; font-weight: 700; color: #6b21a8;">${curr.effectiveTaxRatePct.toFixed(1)}%</td>
+                  <td style="text-align: right; font-family: monospace; font-weight: 600;">${(curr.effectiveTaxRatePct - selPrior.effectiveTaxRatePct) >= 0 ? '+' : ''}${(curr.effectiveTaxRatePct - selPrior.effectiveTaxRatePct).toFixed(1)}%</td>
+                </tr>
+                <tr>
+                  <td style="padding: 2.5px 0; color: #1e293b; font-weight: 600;">Net Profit Margin (After Tax)</td>
+                  <td style="text-align: right; font-family: monospace;">${base.netMarginPct.toFixed(1)}%</td>
+                  <td style="text-align: right; font-family: monospace;">${metricsMap[currentYear - 2].netMarginPct.toFixed(1)}%</td>
+                  <td style="text-align: right; font-family: monospace;">${selPrior.netMarginPct.toFixed(1)}%</td>
+                  <td style="text-align: right; font-family: monospace; font-weight: 700; color: #0284c7;">${curr.netMarginPct.toFixed(1)}%</td>
+                  <td style="text-align: right; font-family: monospace; font-weight: 600;">${(curr.netMarginPct - selPrior.netMarginPct) >= 0 ? '+' : ''}${(curr.netMarginPct - selPrior.netMarginPct).toFixed(1)}%</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Statutory & Notes Box -->
+          <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 10px; font-size: 8px; color: #475569; display: flex; flex-direction: column; justify-content: space-between;">
+            <div>
+              <div style="font-weight: 800; text-transform: uppercase; color: #1e293b; margin-bottom: 2px;">
+                Statutory Regulatory References & Notes
+              </div>
+              <ul style="margin: 0; padding-left: 14px; line-height: 1.4;">
+                <li>${is1701 ? 'Governed by National Internal Revenue Code (NIRC) Sec. 24(A) as amended by TRAIN Act (RA 10963) & EOPT Act (RA 11976).' : 'Governed by National Internal Revenue Code (NIRC) Sec. 27(A) as amended by CREATE Act (RA 11534).'}</li>
+                <li>Deduction Method: <strong>${currentData.deductionMethod === 'osd' ? 'Optional Standard Deduction (40%)' : 'Ordinary Allowable Itemized Deductions (NIRC Sec. 34)'}</strong>.</li>
+                <li>Ease of Paying Taxes (eOPT) Act (RA 11976) compliance applies to filing periods and classification thresholds.</li>
+                <li>Amounts derived from taxpayer books and annual income tax return (${is1701 ? 'BIR Form 1701' : 'BIR Form 1702-RT'}).</li>
+              </ul>
+            </div>
+            <div style="font-style: italic; color: #64748b; margin-top: 4px;">
+              * Confidential comparative audit working paper for internal review and BIR tax filing records.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer & Signatures Block -->
+      <div style="border-top: 1px solid #cbd5e1; padding-top: 8px; font-size: 8.5px; color: #64748b; display: flex; justify-content: space-between; align-items: flex-end;">
+        <div>
+          <div><strong>BIR Tax Return Calculator & Variance Engine</strong> • Republic Act No. 11976 (eOPT Act) & RA 11534 (CREATE Act)</div>
+          <div>Report Generated: ${reportDate} • Document Reference: ${is1701 ? `BIR-1701-VAR-${currentYear}` : `BIR-1702RT-VAR-${currentYear}`}</div>
+        </div>
+        <div style="display: flex; gap: 36px; text-align: center;">
+          <div>
+            <div style="width: 150px; border-bottom: 1px solid #94a3b8; margin-bottom: 3px;"></div>
+            <div style="font-weight: 700; color: #0f172a;">${client?.registeredName ? 'Authorized Signatory' : 'Taxpayer / Finance Head'}</div>
+            <div style="font-size: 7.5px; color: #64748b;">Prepared By / Taxpayer</div>
+          </div>
+          <div>
+            <div style="width: 150px; border-bottom: 1px solid #94a3b8; margin-bottom: 3px;"></div>
+            <div style="font-weight: 700; color: #0f172a;">Certified Public Accountant</div>
+            <div style="font-size: 7.5px; color: #64748b;">Certified Correct (Auditor / Tax Agent)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(container);
+
+  try {
+    const pageEl = container.querySelector('#pdf-variance-statement-page') as HTMLElement;
+    if (!pageEl) {
+      throw new Error('Failed to locate PDF variance statement container element');
+    }
+
+    const canvas = await html2canvas(pageEl, {
+      scale: 2,
+      useCORS: true,
+      backgroundColor: '#ffffff',
+      logging: false,
+    });
+
+    const pdf = new jsPDF({
+      orientation: 'landscape',
+      unit: 'mm',
+      format: 'a4',
+      compress: true,
+    });
+
+    const imgData = canvas.toDataURL('image/png');
+    pdf.addImage(imgData, 'PNG', 0, 0, 297, 210, undefined, 'FAST');
+
+    pdf.save(`${is1701 ? 'BIR_1701' : 'BIR_1702'}_Comparative_Variance_${cleanCompName}_TY${currentYear}.pdf`);
+  } finally {
+    if (document.body.contains(container)) {
+      document.body.removeChild(container);
+    }
+  }
+}
+
 

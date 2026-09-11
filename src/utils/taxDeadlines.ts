@@ -206,7 +206,7 @@ export function getBirDeadlinesForMonth(year: number, month: number): TaxDeadlin
       'eBIRForms / eFPS / eAFS for attachments',
       'NIRC Sec. 51; EOPT Act (RA 11976)',
       'Annual final reconciliation of individual business/professional income tax for the prior calendar year.',
-      '1701Q'
+      '1701Annual'
     );
 
     addDeadline(
@@ -224,7 +224,7 @@ export function getBirDeadlinesForMonth(year: number, month: number): TaxDeadlin
       'eBIRForms / eFPS / eAFS portal',
       'NIRC Sec. 52 & 75; EOPT Act (RA 11976)',
       'Annual Corporate Income Tax Return for corporations, partnerships, and other juridical entities.',
-      '1702Q'
+      '1702Annual'
     );
   }
 

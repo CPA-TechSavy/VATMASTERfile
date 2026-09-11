@@ -5,6 +5,8 @@ import {
   Data2551Q,
   Data1601C,
   Data1601EQ,
+  Data1701Annual,
+  Data1702Annual,
   PenaltiesData,
   Quarter,
 } from '../types/tax';
@@ -891,4 +893,219 @@ export function getRealTimeTaxPeriod(): {
   }
   return { year, quarter, month };
 }
+
+export interface Result1701Annual {
+  totalGrossRevenues: number;
+  grossIncome: number;
+  allowableDeductions: number;
+  deductionType: 'OSD (40%)' | 'Itemized' | '8% Fixed Reduction (₱250k)' | 'None (Mixed Income)';
+  netTaxableIncome: number;
+  taxDue: number;
+  totalTaxCredits: number;
+  quarterlyTaxPayments: number; // Q1 + Q2 + Q3
+  netTaxPayable: number;
+  isOverpayment: boolean;
+  installment1stDue: number;
+  installment2ndDue: number;
+  boxBreakdown: {
+    lineGrossSales: number;
+    lineCostOfSales: number;
+    lineNonOperating: number;
+    lineTotalGross: number;
+    lineDeductions: number;
+    lineTaxableIncome: number;
+    lineTaxDue: number;
+    lineQuarterlyPaid: number;
+    lineCwtCredits: number;
+    lineTotalCredits: number;
+    lineNetTaxPayable: number;
+  };
+}
+
+export function calculate1701Annual(data: Data1701Annual): Result1701Annual {
+  const lineGrossSales = Number(data.grossSales) || 0;
+  const lineSalesReturns = Number(data.salesReturnsDiscounts) || 0;
+  const lineNetSales = Math.max(0, lineGrossSales - lineSalesReturns);
+  const lineCostOfSales = Number(data.costOfSales) || 0;
+  const lineNonOperating = Number(data.nonOperatingIncome) || 0;
+  const lineTotalGross = lineNetSales + lineNonOperating;
+
+  let allowableDeductions = 0;
+  let deductionType: Result1701Annual['deductionType'] = 'None (Mixed Income)';
+  let netTaxableIncome = 0;
+  let taxDue = 0;
+  let grossIncome = lineNetSales;
+
+  if (data.taxRegime === '8_percent') {
+    if (data.taxpayerType === 'pure_business') {
+      allowableDeductions = 250000;
+      deductionType = '8% Fixed Reduction (₱250k)';
+      netTaxableIncome = Math.max(0, lineTotalGross - allowableDeductions);
+    } else {
+      allowableDeductions = 0;
+      deductionType = 'None (Mixed Income)';
+      netTaxableIncome = lineTotalGross;
+    }
+    taxDue = netTaxableIncome * 0.08;
+  } else {
+    // Graduated
+    if (data.deductionMethod === 'osd') {
+      // Under Section 34(L) of Tax Code for Individuals: 40% of Gross Sales/Receipts
+      allowableDeductions = lineNetSales * 0.4;
+      deductionType = 'OSD (40%)';
+      netTaxableIncome = Math.max(0, lineTotalGross - allowableDeductions);
+    } else {
+      // Itemized
+      grossIncome = Math.max(0, lineNetSales - lineCostOfSales);
+      allowableDeductions = Number(data.operatingExpenses) || 0;
+      deductionType = 'Itemized';
+      netTaxableIncome = Math.max(0, grossIncome + lineNonOperating - allowableDeductions);
+    }
+    taxDue = computeGraduatedTax(netTaxableIncome);
+  }
+
+  const quarterlyTaxPayments =
+    (Number(data.quarterlyTaxPaidQ1) || 0) +
+    (Number(data.quarterlyTaxPaidQ2) || 0) +
+    (Number(data.quarterlyTaxPaidQ3) || 0);
+
+  const totalTaxCredits =
+    (Number(data.priorYearExcessCredits) || 0) +
+    quarterlyTaxPayments +
+    (Number(data.cwt2307Credits) || 0) +
+    (Number(data.otherTaxCredits) || 0);
+
+  const netTaxPayable = taxDue - totalTaxCredits;
+  const isOverpayment = netTaxPayable < 0;
+
+  const installment1stDue =
+    data.optForInstallment && netTaxPayable > 2000
+      ? Math.round((netTaxPayable / 2) * 100) / 100
+      : Math.max(0, netTaxPayable);
+  const installment2ndDue =
+    data.optForInstallment && netTaxPayable > 2000
+      ? Math.round((netTaxPayable - installment1stDue) * 100) / 100
+      : 0;
+
+  return {
+    totalGrossRevenues: lineTotalGross,
+    grossIncome,
+    allowableDeductions,
+    deductionType,
+    netTaxableIncome,
+    taxDue,
+    totalTaxCredits,
+    quarterlyTaxPayments,
+    netTaxPayable,
+    isOverpayment,
+    installment1stDue,
+    installment2ndDue,
+    boxBreakdown: {
+      lineGrossSales,
+      lineCostOfSales,
+      lineNonOperating,
+      lineTotalGross,
+      lineDeductions: allowableDeductions,
+      lineTaxableIncome: netTaxableIncome,
+      lineTaxDue: taxDue,
+      lineQuarterlyPaid: quarterlyTaxPayments,
+      lineCwtCredits: Number(data.cwt2307Credits) || 0,
+      lineTotalCredits: totalTaxCredits,
+      lineNetTaxPayable: netTaxPayable,
+    },
+  };
+}
+
+export interface Result1702Annual {
+  grossSales: number;
+  salesReturnsDiscounts: number;
+  netSales: number;
+  costOfSales: number;
+  grossIncomeFromOperations: number;
+  totalGrossIncome: number;
+  allowableDeductions: number;
+  deductionType: 'OSD (40%)' | 'Itemized';
+  operatingExpenses: number;
+  netTaxableIncome: number;
+  ncitTaxDue: number;
+  mcitTaxDue: number;
+  appliedTaxType: 'Regular (25%)' | 'MSME (20%)' | 'MCIT (2%)';
+  taxDue: number;
+  quarterlyTaxPayments: number;
+  totalTaxCredits: number;
+  netTaxPayable: number;
+  isOverpayment: boolean;
+}
+
+export function calculate1702Annual(data: Data1702Annual): Result1702Annual {
+  const grossSales = Number(data.grossSales) || 0;
+  const salesReturnsDiscounts = Number(data.salesReturnsDiscounts) || 0;
+  const netSales = Math.max(0, grossSales - salesReturnsDiscounts);
+  const costOfSales = Number(data.costOfSales) || 0;
+  const grossIncomeFromOperations = Math.max(0, netSales - costOfSales);
+  const nonOperating = Number(data.nonOperatingIncome) || 0;
+  const totalGrossIncome = grossIncomeFromOperations + nonOperating;
+
+  let allowableDeductions = 0;
+  let deductionType: Result1702Annual['deductionType'] = 'Itemized';
+
+  if (data.deductionMethod === 'osd') {
+    // 40% of Total Gross Income under Tax Code Sec 34(L) for Corporations
+    allowableDeductions = totalGrossIncome * 0.4;
+    deductionType = 'OSD (40%)';
+  } else {
+    allowableDeductions = Number(data.operatingExpenses) || 0;
+    deductionType = 'Itemized';
+  }
+
+  const netTaxableIncome = Math.max(0, totalGrossIncome - allowableDeductions);
+  const ratePercent = data.rateOption === 'msme_20' ? 0.2 : 0.25;
+  const ncitTaxDue = netTaxableIncome * ratePercent;
+  const mcitTaxDue = data.isMCOptional ? grossIncomeFromOperations * 0.02 : 0;
+
+  let taxDue = ncitTaxDue;
+  let appliedTaxType: Result1702Annual['appliedTaxType'] =
+    data.rateOption === 'msme_20' ? 'MSME (20%)' : 'Regular (25%)';
+
+  if (data.isMCOptional && mcitTaxDue > ncitTaxDue) {
+    taxDue = mcitTaxDue;
+    appliedTaxType = 'MCIT (2%)';
+  }
+
+  const quarterlyTaxPayments =
+    (Number(data.quarterlyTaxPaidQ1) || 0) +
+    (Number(data.quarterlyTaxPaidQ2) || 0) +
+    (Number(data.quarterlyTaxPaidQ3) || 0);
+
+  const totalTaxCredits =
+    (Number(data.priorYearExcessCredits) || 0) +
+    quarterlyTaxPayments +
+    (Number(data.cwt2307Credits) || 0) +
+    (Number(data.excessMCITPriorYears) || 0) +
+    (Number(data.otherTaxCredits) || 0);
+
+  const netTaxPayable = taxDue - totalTaxCredits;
+
+  return {
+    grossSales,
+    salesReturnsDiscounts,
+    netSales,
+    costOfSales,
+    grossIncomeFromOperations,
+    totalGrossIncome,
+    allowableDeductions,
+    deductionType,
+    operatingExpenses: Number(data.operatingExpenses) || 0,
+    netTaxableIncome,
+    ncitTaxDue,
+    mcitTaxDue,
+    appliedTaxType,
+    taxDue,
+    quarterlyTaxPayments,
+    totalTaxCredits,
+    netTaxPayable,
+    isOverpayment: netTaxPayable < 0,
+  };
+}
+
 

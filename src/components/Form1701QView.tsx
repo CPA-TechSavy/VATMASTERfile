@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Data1701Q, ClientProfile, Quarter } from '../types/tax';
 import { calculate1701Q } from '../utils/taxCalculations';
 import { formatPHP, parseNumber } from '../utils/formatters';
-import { Calculator, AlertTriangle } from 'lucide-react';
+import { Calculator, AlertTriangle, Save, CheckCircle2, Sparkles, RefreshCw } from 'lucide-react';
 import { PenaltiesModal } from './PenaltiesModal';
 
 interface Form1701QViewProps {
@@ -11,6 +11,11 @@ interface Form1701QViewProps {
   year: number;
   data: Data1701Q;
   onChange: (updated: Data1701Q) => void;
+  salesSourceInfo?: {
+    formName: '2550Q' | '2551Q';
+    combinedSales: number;
+    isVat: boolean;
+  };
 }
 
 export const Form1701QView: React.FC<Form1701QViewProps> = ({
@@ -19,8 +24,63 @@ export const Form1701QView: React.FC<Form1701QViewProps> = ({
   year,
   data,
   onChange,
+  salesSourceInfo,
 }) => {
   const [showPenalties, setShowPenalties] = useState(false);
+  const [saveSuccessMessage, setSaveSuccessMessage] = useState(false);
+  const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
+
+  const explicitQuarterKey = `bir_saved_1701q_${client.id}_${year}_${quarter}`;
+
+  // Load saved timestamp for this quarter
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(explicitQuarterKey);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        setLastSavedTime(
+          parsed.timeFormatted ||
+            (parsed.savedAt
+              ? new Date(parsed.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+              : 'Previously saved')
+        );
+      } else {
+        setLastSavedTime(null);
+      }
+    } catch (e) {
+      setLastSavedTime(null);
+    }
+  }, [explicitQuarterKey]);
+
+  const handleSaveQuarterData = () => {
+    onChange(data);
+
+    const timestamp = new Date().toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+
+    try {
+      localStorage.setItem(
+        explicitQuarterKey,
+        JSON.stringify({
+          data,
+          savedAt: new Date().toISOString(),
+          timeFormatted: timestamp,
+          clientId: client.id,
+          quarter,
+          year,
+        })
+      );
+    } catch (e) {
+      console.error('Failed to save 1701Q quarter data', e);
+    }
+
+    setLastSavedTime(timestamp);
+    setSaveSuccessMessage(true);
+    setTimeout(() => setSaveSuccessMessage(false), 4000);
+  };
 
   const result = calculate1701Q(data);
 
@@ -127,19 +187,45 @@ export const Form1701QView: React.FC<Form1701QViewProps> = ({
 
             <div className="space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <label className="text-sm text-slate-700 font-medium">
-                  Gross Sales / Receipts (This Quarter)
-                </label>
-                <div className="relative w-full sm:w-60">
-                  <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
-                  <input
-                    id="gross-sales-cq-1701q"
-                    type="number"
-                    value={data.grossSalesCurrentQuarter || ''}
-                    onChange={(e) => updateField('grossSalesCurrentQuarter', parseNumber(e.target.value))}
-                    placeholder="0.00"
-                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                  />
+                <div>
+                  <label className="text-sm text-slate-700 font-medium flex items-center gap-2 flex-wrap">
+                    <span>Gross Sales / Receipts (This Quarter)</span>
+                    {salesSourceInfo && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-md">
+                        <Sparkles className="w-3 h-3 text-indigo-600" />
+                        <span>Auto-reflects Form {salesSourceInfo.formName}</span>
+                      </span>
+                    )}
+                  </label>
+                  {salesSourceInfo && (
+                    <div className="text-[11px] text-slate-500 mt-0.5">
+                      Combined Sales in Form {salesSourceInfo.formName} ({salesSourceInfo.isVat ? '12% VAT' : 'Percentage Tax'}): {formatPHP(salesSourceInfo.combinedSales)}
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <div className="relative w-full sm:w-60">
+                    <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
+                    <input
+                      id="gross-sales-cq-1701q"
+                      type="number"
+                      value={data.grossSalesCurrentQuarter || ''}
+                      onChange={(e) => updateField('grossSalesCurrentQuarter', parseNumber(e.target.value))}
+                      placeholder="0.00"
+                      className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-indigo-50/30"
+                    />
+                  </div>
+                  {salesSourceInfo && data.grossSalesCurrentQuarter !== salesSourceInfo.combinedSales && (
+                    <button
+                      type="button"
+                      onClick={() => updateField('grossSalesCurrentQuarter', salesSourceInfo.combinedSales)}
+                      title={`Sync with Form ${salesSourceInfo.formName} Combined Sales (${formatPHP(salesSourceInfo.combinedSales)})`}
+                      className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 border border-indigo-300 rounded-lg transition-colors cursor-pointer"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      <span>Sync</span>
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -346,6 +432,34 @@ export const Form1701QView: React.FC<Form1701QViewProps> = ({
                     ? 'Carried over to next quarter or available for refund'
                     : 'Due on statutory quarterly deadline'}
                 </div>
+              </div>
+
+              {/* Save Button under Net Tax Payable */}
+              <div className="pt-2">
+                <button
+                  type="button"
+                  id="save-quarter-data-1701q-btn"
+                  onClick={handleSaveQuarterData}
+                  className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-bold text-sm rounded-xl shadow-xs hover:shadow-md transition-all cursor-pointer"
+                >
+                  {saveSuccessMessage ? (
+                    <>
+                      <CheckCircle2 className="w-4 h-4 text-indigo-200 animate-in zoom-in-50" />
+                      <span>Data Saved for {quarter} {year}!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4" />
+                      <span>Save {quarter} {year} Data</span>
+                    </>
+                  )}
+                </button>
+                {lastSavedTime && (
+                  <div className="text-[11px] text-indigo-800 bg-indigo-50 border border-indigo-200 rounded-lg p-2 mt-2 text-center flex items-center justify-center gap-1.5 font-medium">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Quarter data saved at {lastSavedTime}</span>
+                  </div>
+                )}
               </div>
             </div>
 

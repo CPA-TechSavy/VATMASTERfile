@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Data2551Q, ClientProfile, Quarter } from '../types/tax';
 import { calculate2551Q } from '../utils/taxCalculations';
 import { formatPHP, parseNumber } from '../utils/formatters';
-import { AlertTriangle, Download, BookOpen, TrendingUp } from 'lucide-react';
+import { AlertTriangle, Download, BookOpen, TrendingUp, Save, CheckCircle2 } from 'lucide-react';
 import { PenaltiesModal } from './PenaltiesModal';
 import { BranchVatSchedule } from './BranchVatSchedule';
 import { EoptSalesGuideModal } from './EoptSalesGuideModal';
@@ -26,6 +26,60 @@ export const Form2551QView: React.FC<Form2551QViewProps> = ({
 }) => {
   const [showPenalties, setShowPenalties] = useState(false);
   const [showEoptModal, setShowEoptModal] = useState(false);
+  const [saveSuccessMessage, setSaveSuccessMessage] = useState(false);
+  const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
+
+  const explicitQuarterKey = `bir_saved_2551q_${client.id}_${year}_${quarter}`;
+
+  // Load saved timestamp for this quarter
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(explicitQuarterKey);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        setLastSavedTime(
+          parsed.timeFormatted ||
+            (parsed.savedAt
+              ? new Date(parsed.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+              : 'Previously saved')
+        );
+      } else {
+        setLastSavedTime(null);
+      }
+    } catch (e) {
+      setLastSavedTime(null);
+    }
+  }, [explicitQuarterKey]);
+
+  const handleSaveQuarterData = () => {
+    onChange(data);
+
+    const timestamp = new Date().toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+
+    try {
+      localStorage.setItem(
+        explicitQuarterKey,
+        JSON.stringify({
+          data,
+          savedAt: new Date().toISOString(),
+          timeFormatted: timestamp,
+          clientId: client.id,
+          quarter,
+          year,
+        })
+      );
+    } catch (e) {
+      console.error('Failed to save 2551Q quarter data', e);
+    }
+
+    setLastSavedTime(timestamp);
+    setSaveSuccessMessage(true);
+    setTimeout(() => setSaveSuccessMessage(false), 4000);
+  };
 
   const result = calculate2551Q(data);
 
@@ -408,6 +462,34 @@ export const Form2551QView: React.FC<Form2551QViewProps> = ({
                     ? 'Excess creditable withholding percentage tax'
                     : 'Payable on or before the 25th day following close of quarter'}
                 </div>
+              </div>
+
+              {/* Save Button under Net Tax Payable */}
+              <div className="pt-2">
+                <button
+                  type="button"
+                  id="save-quarter-data-2551q-btn"
+                  onClick={handleSaveQuarterData}
+                  className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white font-bold text-sm rounded-xl shadow-xs hover:shadow-md transition-all cursor-pointer"
+                >
+                  {saveSuccessMessage ? (
+                    <>
+                      <CheckCircle2 className="w-4 h-4 text-amber-200 animate-in zoom-in-50" />
+                      <span>Data Saved for {quarter} {year}!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4" />
+                      <span>Save {quarter} {year} Data</span>
+                    </>
+                  )}
+                </button>
+                {lastSavedTime && (
+                  <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2 mt-2 text-center flex items-center justify-center gap-1.5 font-medium">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Quarter data saved at {lastSavedTime}</span>
+                  </div>
+                )}
               </div>
             </div>
           </div>
