@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Data1702Annual, ClientProfile, ExpenseAccountItem } from '../types/tax';
+import { SawtSummary } from '../types/sawt';
 import { calculate1702Annual } from '../utils/taxCalculations';
 import { formatPHP, parseNumber } from '../utils/formatters';
 import {
@@ -12,11 +13,15 @@ import {
   HelpCircle,
   ListPlus,
   ShoppingBag,
+  FileSpreadsheet,
+  RotateCcw,
 } from 'lucide-react';
 import { PenaltiesModal } from './PenaltiesModal';
 import { ExpenseBreakdownModal } from './ExpenseBreakdownModal';
 import { ComparativeFinancialStatements } from './ComparativeFinancialStatements';
 import { ConsolidatedAnnualPurchasesModal } from './ConsolidatedAnnualPurchasesModal';
+import { SawtUploadModal } from './SawtUploadModal';
+import { AccountingInput } from './AccountingInput';
 
 interface Form1702AnnualViewProps {
   client: ClientProfile;
@@ -52,9 +57,89 @@ export const Form1702AnnualView: React.FC<Form1702AnnualViewProps> = ({
 }) => {
   const [showPenalties, setShowPenalties] = useState(false);
   const [showPurchasesModal, setShowPurchasesModal] = useState(false);
+  const [showSawtModal, setShowSawtModal] = useState(false);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const [pullStatus, setPullStatus] = useState<string | null>(null);
   const [breakdownTarget, setBreakdownTarget] = useState<'cogs' | 'itemized' | null>(null);
+
+  // SAWT state persisted per client & tax year
+  const [sawtSummary, setSawtSummary] = useState<SawtSummary | null>(() => {
+    try {
+      const saved = localStorage.getItem(`bir_sawt_${client.id}_${year}`);
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  // Re-read SAWT when client or year changes
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(`bir_sawt_${client.id}_${year}`);
+      setSawtSummary(saved ? JSON.parse(saved) : null);
+    } catch {
+      setSawtSummary(null);
+    }
+  }, [client.id, year]);
+
+  // Automatically reflect 1702Q quarterly payments if client has paid in 1702Q, otherwise reflect 0
+  useEffect(() => {
+    if (!quartersDataSummary) return;
+    const q1 = quartersDataSummary.q1TaxPaid ?? 0;
+    const q2 = quartersDataSummary.q2TaxPaid ?? 0;
+    const q3 = quartersDataSummary.q3TaxPaid ?? 0;
+
+    if (
+      (data.quarterlyTaxPaidQ1 ?? 0) !== q1 ||
+      (data.quarterlyTaxPaidQ2 ?? 0) !== q2 ||
+      (data.quarterlyTaxPaidQ3 ?? 0) !== q3
+    ) {
+      onChange({
+        ...data,
+        quarterlyTaxPaidQ1: q1,
+        quarterlyTaxPaidQ2: q2,
+        quarterlyTaxPaidQ3: q3,
+      });
+    }
+  }, [
+    quartersDataSummary?.q1TaxPaid,
+    quartersDataSummary?.q2TaxPaid,
+    quartersDataSummary?.q3TaxPaid,
+  ]);
+
+  const handleSync1702QPayments = () => {
+    if (!quartersDataSummary) return;
+    const q1 = quartersDataSummary.q1TaxPaid ?? 0;
+    const q2 = quartersDataSummary.q2TaxPaid ?? 0;
+    const q3 = quartersDataSummary.q3TaxPaid ?? 0;
+    onChange({
+      ...data,
+      quarterlyTaxPaidQ1: q1,
+      quarterlyTaxPaidQ2: q2,
+      quarterlyTaxPaidQ3: q3,
+    });
+    setPullStatus('Quarterly payments re-synced from Form 1702Q!');
+    setTimeout(() => setPullStatus(null), 3000);
+  };
+
+  const handleApplySawtCwt = (totalCwt: number, summary: SawtSummary) => {
+    setSawtSummary(summary);
+    try {
+      localStorage.setItem(`bir_sawt_${client.id}_${year}`, JSON.stringify(summary));
+    } catch (e) {
+      console.error('Failed to cache SAWT data', e);
+    }
+    updateField('cwt2307Credits', totalCwt);
+    setPullStatus(`Form 2307 CWT updated to ₱${formatPHP(totalCwt, false)} from SAWT Excel!`);
+    setTimeout(() => setPullStatus(null), 3500);
+  };
+
+  const handleClearSawt = () => {
+    setSawtSummary(null);
+    try {
+      localStorage.removeItem(`bir_sawt_${client.id}_${year}`);
+    } catch {}
+  };
 
   const result = calculate1702Annual(data);
 
@@ -151,16 +236,19 @@ export const Form1702AnnualView: React.FC<Form1702AnnualViewProps> = ({
               <span>{saveStatus || `Save TY ${year} Data`}</span>
             </button>
 
-            <button
-              id="open-consolidated-purchases-1702-btn"
-              type="button"
-              onClick={() => setShowPurchasesModal(true)}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors shadow-xs border border-indigo-400/30 cursor-pointer"
-              title="Consolidated list of Purchases from different Quarters (combined by Registered Name)"
-            >
-              <ShoppingBag className="w-3.5 h-3.5 text-indigo-200" />
-              <span>Consolidated Purchases</span>
-            </button>
+            {/* Only show Consolidated Purchases for VAT-registered taxpayers. Non-VAT taxpayers do not submit list of purchases */}
+            {client.vatStatus === 'vat-registered' && (
+              <button
+                id="open-consolidated-purchases-1702-btn"
+                type="button"
+                onClick={() => setShowPurchasesModal(true)}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors shadow-xs border border-indigo-400/30 cursor-pointer"
+                title="Consolidated list of Purchases from different Quarters (combined by Registered Name)"
+              >
+                <ShoppingBag className="w-3.5 h-3.5 text-indigo-200" />
+                <span>Consolidated Purchases</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -286,13 +374,12 @@ export const Form1702AnnualView: React.FC<Form1702AnnualViewProps> = ({
                 </div>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-xs text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInput
                     id="gross-sales-1702-annual"
-                    type="number"
-                    value={data.grossSales || ''}
-                    onChange={(e) => updateField('grossSales', parseNumber(e.target.value))}
+                    value={data.grossSales}
+                    onChange={(val) => updateField('grossSales', val)}
                     placeholder="0.00"
-                    className="w-full pl-6 pr-3 py-1.5 text-xs font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    className="w-full pl-6 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
                   />
                 </div>
               </div>
@@ -305,13 +392,12 @@ export const Form1702AnnualView: React.FC<Form1702AnnualViewProps> = ({
                 </div>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-xs text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInput
                     id="sales-returns-1702-annual"
-                    type="number"
-                    value={data.salesReturnsDiscounts || ''}
-                    onChange={(e) => updateField('salesReturnsDiscounts', parseNumber(e.target.value))}
+                    value={data.salesReturnsDiscounts}
+                    onChange={(val) => updateField('salesReturnsDiscounts', val)}
                     placeholder="0.00"
-                    className="w-full pl-6 pr-3 py-1.5 text-xs font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    className="w-full pl-6 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
                   />
                 </div>
               </div>
@@ -338,19 +424,15 @@ export const Form1702AnnualView: React.FC<Form1702AnnualViewProps> = ({
                       )}
                     </button>
                   </div>
-                  <div className="text-[11px] text-slate-400">
-                    Direct material, labor, and overhead
-                  </div>
                 </div>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-xs text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInput
                     id="cost-sales-1702-annual"
-                    type="number"
-                    value={data.costOfSales || ''}
-                    onChange={(e) => updateField('costOfSales', parseNumber(e.target.value))}
+                    value={data.costOfSales}
+                    onChange={(val) => updateField('costOfSales', val)}
                     placeholder="0.00"
-                    className="w-full pl-6 pr-3 py-1.5 text-xs font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    className="w-full pl-6 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
                   />
                 </div>
               </div>
@@ -360,19 +442,15 @@ export const Form1702AnnualView: React.FC<Form1702AnnualViewProps> = ({
                   <label className="text-xs font-medium text-slate-700">
                     Non-Operating & Other Taxable Income
                   </label>
-                  <div className="text-[11px] text-slate-400">
-                    Dividends, interest, rent, capital gain not subjected to final tax
-                  </div>
                 </div>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-xs text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInput
                     id="non-op-1702-annual"
-                    type="number"
-                    value={data.nonOperatingIncome || ''}
-                    onChange={(e) => updateField('nonOperatingIncome', parseNumber(e.target.value))}
+                    value={data.nonOperatingIncome}
+                    onChange={(val) => updateField('nonOperatingIncome', val)}
                     placeholder="0.00"
-                    className="w-full pl-6 pr-3 py-1.5 text-xs font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    className="w-full pl-6 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
                   />
                 </div>
               </div>
@@ -401,19 +479,15 @@ export const Form1702AnnualView: React.FC<Form1702AnnualViewProps> = ({
                         )}
                       </button>
                     </div>
-                    <div className="text-[11px] text-slate-400">
-                      Administrative expenses, salaries, rent, depreciation, taxes
-                    </div>
                   </div>
                   <div className="relative w-full sm:w-60">
                     <span className="absolute left-3 top-2 text-xs text-slate-400 font-mono">₱</span>
-                    <input
+                    <AccountingInput
                       id="operating-expenses-1702-annual"
-                      type="number"
-                      value={data.operatingExpenses || ''}
-                      onChange={(e) => updateField('operatingExpenses', parseNumber(e.target.value))}
+                      value={data.operatingExpenses}
+                      onChange={(val) => updateField('operatingExpenses', val)}
                       placeholder="0.00"
-                      className="w-full pl-6 pr-3 py-1.5 text-xs font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      className="w-full pl-6 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
                     />
                   </div>
                 </div>
@@ -435,61 +509,144 @@ export const Form1702AnnualView: React.FC<Form1702AnnualViewProps> = ({
 
           {/* Part III: Tax Relief / Credits & Prior Quarterly Payments */}
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-              <div className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                Part III: Tax Credits, Quarterly Payments (Form 1702Q) & 2307
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-2 gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                  Part III: Tax Credits, Quarterly Payments (Form 1702Q) & 2307
+                </span>
+                <span className="text-[10px] font-semibold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3 text-blue-600" />
+                  1702Q Auto-Reflected
+                </span>
               </div>
-              <span className="text-xs font-mono text-slate-400">Schedule Part V</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  id="open-sawt-upload-modal-btn"
+                  onClick={() => setShowSawtModal(true)}
+                  className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 rounded-lg transition-colors cursor-pointer shadow-2xs"
+                  title="Upload SAWT Excel file to automatically calculate Form 2307 CWT (Full Year)"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>{sawtSummary ? 'SAWT Excel (Linked)' : 'Upload SAWT Excel'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSync1702QPayments}
+                  className="flex items-center gap-1 px-2 py-1 text-xs text-slate-500 hover:text-slate-800 hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors cursor-pointer"
+                  title="Force re-sync quarterly payments directly from Form 1702Q"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>Re-sync 1702Q</span>
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
-                <label className="block text-xs text-slate-600 mb-1">
-                  Q1 Tax Paid (Form 1702Q)
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-medium text-slate-700">
+                    Q1 Tax Paid (Form 1702Q)
+                  </label>
+                  {quartersDataSummary && (
+                    <span
+                      className={`text-[10px] font-mono px-1.5 py-0.2 rounded border ${
+                        quartersDataSummary.q1TaxPaid > 0
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200 font-semibold'
+                          : 'bg-slate-100 text-slate-500 border-slate-200'
+                      }`}
+                      title={
+                        quartersDataSummary.q1TaxPaid > 0
+                          ? 'Reflected automatically from client Form 1702Q Q1 return'
+                          : 'No tax payment in Form 1702Q Q1 (defaulted to 0)'
+                      }
+                    >
+                      {quartersDataSummary.q1TaxPaid > 0
+                        ? `Paid: ₱${formatPHP(quartersDataSummary.q1TaxPaid, false)}`
+                        : '1702Q: ₱0.00'}
+                    </span>
+                  )}
+                </div>
                 <div className="relative">
                   <span className="absolute left-3 top-2 text-xs text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInput
                     id="corp-q1-paid"
-                    type="number"
-                    value={data.quarterlyTaxPaidQ1 || ''}
-                    onChange={(e) => updateField('quarterlyTaxPaidQ1', parseNumber(e.target.value))}
+                    value={data.quarterlyTaxPaidQ1 ?? 0}
+                    onChange={(val) => updateField('quarterlyTaxPaidQ1', val)}
                     placeholder="0.00"
-                    className="w-full pl-6 pr-3 py-1.5 text-xs font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    className="w-full pl-6 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-slate-50/50"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs text-slate-600 mb-1">
-                  Q2 Tax Paid (Form 1702Q)
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-medium text-slate-700">
+                    Q2 Tax Paid (Form 1702Q)
+                  </label>
+                  {quartersDataSummary && (
+                    <span
+                      className={`text-[10px] font-mono px-1.5 py-0.2 rounded border ${
+                        quartersDataSummary.q2TaxPaid > 0
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200 font-semibold'
+                          : 'bg-slate-100 text-slate-500 border-slate-200'
+                      }`}
+                      title={
+                        quartersDataSummary.q2TaxPaid > 0
+                          ? 'Reflected automatically from client Form 1702Q Q2 return'
+                          : 'No tax payment in Form 1702Q Q2 (defaulted to 0)'
+                      }
+                    >
+                      {quartersDataSummary.q2TaxPaid > 0
+                        ? `Paid: ₱${formatPHP(quartersDataSummary.q2TaxPaid, false)}`
+                        : '1702Q: ₱0.00'}
+                    </span>
+                  )}
+                </div>
                 <div className="relative">
                   <span className="absolute left-3 top-2 text-xs text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInput
                     id="corp-q2-paid"
-                    type="number"
-                    value={data.quarterlyTaxPaidQ2 || ''}
-                    onChange={(e) => updateField('quarterlyTaxPaidQ2', parseNumber(e.target.value))}
+                    value={data.quarterlyTaxPaidQ2 ?? 0}
+                    onChange={(val) => updateField('quarterlyTaxPaidQ2', val)}
                     placeholder="0.00"
-                    className="w-full pl-6 pr-3 py-1.5 text-xs font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    className="w-full pl-6 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-slate-50/50"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs text-slate-600 mb-1">
-                  Q3 Tax Paid (Form 1702Q)
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-medium text-slate-700">
+                    Q3 Tax Paid (Form 1702Q)
+                  </label>
+                  {quartersDataSummary && (
+                    <span
+                      className={`text-[10px] font-mono px-1.5 py-0.2 rounded border ${
+                        quartersDataSummary.q3TaxPaid > 0
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200 font-semibold'
+                          : 'bg-slate-100 text-slate-500 border-slate-200'
+                      }`}
+                      title={
+                        quartersDataSummary.q3TaxPaid > 0
+                          ? 'Reflected automatically from client Form 1702Q Q3 return'
+                          : 'No tax payment in Form 1702Q Q3 (defaulted to 0)'
+                      }
+                    >
+                      {quartersDataSummary.q3TaxPaid > 0
+                        ? `Paid: ₱${formatPHP(quartersDataSummary.q3TaxPaid, false)}`
+                        : '1702Q: ₱0.00'}
+                    </span>
+                  )}
+                </div>
                 <div className="relative">
                   <span className="absolute left-3 top-2 text-xs text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInput
                     id="corp-q3-paid"
-                    type="number"
-                    value={data.quarterlyTaxPaidQ3 || ''}
-                    onChange={(e) => updateField('quarterlyTaxPaidQ3', parseNumber(e.target.value))}
+                    value={data.quarterlyTaxPaidQ3 ?? 0}
+                    onChange={(val) => updateField('quarterlyTaxPaidQ3', val)}
                     placeholder="0.00"
-                    className="w-full pl-6 pr-3 py-1.5 text-xs font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    className="w-full pl-6 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-slate-50/50"
                   />
                 </div>
               </div>
@@ -502,32 +659,61 @@ export const Form1702AnnualView: React.FC<Form1702AnnualViewProps> = ({
                 </label>
                 <div className="relative">
                   <span className="absolute left-3 top-2 text-xs text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInput
                     id="corp-prior-excess"
-                    type="number"
-                    value={data.priorYearExcessCredits || ''}
-                    onChange={(e) => updateField('priorYearExcessCredits', parseNumber(e.target.value))}
+                    value={data.priorYearExcessCredits}
+                    onChange={(val) => updateField('priorYearExcessCredits', val)}
                     placeholder="0.00"
-                    className="w-full pl-6 pr-3 py-1.5 text-xs font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    className="w-full pl-6 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs text-slate-600 mb-1">
-                  Form 2307 CWT (Full Year)
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-medium text-slate-700">
+                    Form 2307 CWT (Full Year)
+                  </label>
+                  <button
+                    id="upload-sawt-cwt-btn"
+                    type="button"
+                    onClick={() => setShowSawtModal(true)}
+                    className="flex items-center gap-1 text-[11px] font-semibold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 px-1.5 py-0.5 rounded cursor-pointer transition-colors"
+                    title="Upload SAWT Excel file to automatically calculate Form 2307 CWT (Full Year)"
+                  >
+                    <FileSpreadsheet className="w-3 h-3 text-emerald-600" />
+                    <span>{sawtSummary ? 'SAWT' : 'Upload SAWT'}</span>
+                  </button>
+                </div>
                 <div className="relative">
                   <span className="absolute left-3 top-2 text-xs text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInput
                     id="corp-cwt-credits"
-                    type="number"
-                    value={data.cwt2307Credits || ''}
-                    onChange={(e) => updateField('cwt2307Credits', parseNumber(e.target.value))}
+                    value={data.cwt2307Credits}
+                    onChange={(val) => updateField('cwt2307Credits', val)}
                     placeholder="0.00"
-                    className="w-full pl-6 pr-3 py-1.5 text-xs font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    className="w-full pl-6 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
                   />
                 </div>
+                {sawtSummary ? (
+                  <div className="flex items-center justify-between text-[10px] text-emerald-700 mt-1">
+                    <span className="flex items-center gap-1 font-medium truncate max-w-[140px]" title={sawtSummary.fileName}>
+                      <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                      {sawtSummary.records.length} payor(s)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowSawtModal(true)}
+                      className="underline hover:text-emerald-900 cursor-pointer shrink-0 font-medium"
+                    >
+                      View SAWT
+                    </button>
+                  </div>
+                ) : (
+                  <div className="text-[10px] text-slate-400 mt-1">
+                    Direct entry or upload SAWT
+                  </div>
+                )}
               </div>
 
               <div>
@@ -536,13 +722,12 @@ export const Form1702AnnualView: React.FC<Form1702AnnualViewProps> = ({
                 </label>
                 <div className="relative">
                   <span className="absolute left-3 top-2 text-xs text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInput
                     id="corp-mcit-credits"
-                    type="number"
-                    value={data.excessMCITPriorYears || ''}
-                    onChange={(e) => updateField('excessMCITPriorYears', parseNumber(e.target.value))}
+                    value={data.excessMCITPriorYears}
+                    onChange={(val) => updateField('excessMCITPriorYears', val)}
                     placeholder="0.00"
-                    className="w-full pl-6 pr-3 py-1.5 text-xs font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    className="w-full pl-6 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
                   />
                 </div>
               </div>
@@ -553,13 +738,12 @@ export const Form1702AnnualView: React.FC<Form1702AnnualViewProps> = ({
                 </label>
                 <div className="relative">
                   <span className="absolute left-3 top-2 text-xs text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInput
                     id="corp-other-credits"
-                    type="number"
-                    value={data.otherTaxCredits || ''}
-                    onChange={(e) => updateField('otherTaxCredits', parseNumber(e.target.value))}
+                    value={data.otherTaxCredits}
+                    onChange={(val) => updateField('otherTaxCredits', val)}
                     placeholder="0.00"
-                    className="w-full pl-6 pr-3 py-1.5 text-xs font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    className="w-full pl-6 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
                   />
                 </div>
               </div>
@@ -701,12 +885,35 @@ export const Form1702AnnualView: React.FC<Form1702AnnualViewProps> = ({
         }}
       />
 
-      {/* Consolidated Annual Purchases Modal (Quarterly Purchases combined by Registered Name) */}
-      <ConsolidatedAnnualPurchasesModal
-        isOpen={showPurchasesModal}
-        onClose={() => setShowPurchasesModal(false)}
+      {/* Consolidated Annual Purchases Modal (Quarterly Purchases combined by Registered Name) - Only for VAT-registered taxpayers */}
+      {client.vatStatus === 'vat-registered' && (
+        <ConsolidatedAnnualPurchasesModal
+          isOpen={showPurchasesModal}
+          onClose={() => setShowPurchasesModal(false)}
+          client={client}
+          year={year}
+          onApplyToDeductions={(cogsTotal, opexTotal, cogsBreakdown, opexBreakdown) => {
+            onChange({
+              ...data,
+              costOfSales: cogsTotal,
+              operatingExpenses: opexTotal,
+              costOfSalesBreakdown: cogsBreakdown,
+              itemizedDeductionsBreakdown: opexBreakdown,
+            });
+          }}
+        />
+      )}
+
+      {/* SAWT Form 2307 CWT Upload & Calculation Modal */}
+      <SawtUploadModal
+        isOpen={showSawtModal}
+        onClose={() => setShowSawtModal(false)}
         client={client}
         year={year}
+        currentCwtValue={data.cwt2307Credits || 0}
+        existingSummary={sawtSummary}
+        onApplyCwt={handleApplySawtCwt}
+        onClearSummary={handleClearSawt}
       />
     </div>
   );

@@ -146,6 +146,58 @@ export const ComparativeFinancialStatements: React.FC<ComparativeFinancialStatem
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [pdfSuccessToast, setPdfSuccessToast] = useState(false);
 
+  // Expander states for Cost of Goods Sold and Ordinary Allowable Deductions
+  const [isCogsExpanded, setIsCogsExpanded] = useState(false);
+  const [isDeductionsExpanded, setIsDeductionsExpanded] = useState(false);
+
+  // Resolve itemized COGS accounts for current and prior year
+  const cogsBreakdownList = useMemo(() => {
+    let list: Array<{ id?: string; accountName: string; amount: number }> = currentData?.costOfSalesBreakdown || [];
+    if ((!list || list.length === 0) && client?.id) {
+      try {
+        const saved = localStorage.getItem(`bir_cogs_breakdown_${client.id}_${currentYear}`);
+        if (saved) list = JSON.parse(saved);
+      } catch (e) {}
+    }
+    return list;
+  }, [currentData?.costOfSalesBreakdown, client?.id, currentYear]);
+
+  const priorCogsBreakdownList = useMemo(() => {
+    const priorData = allYearsData?.[selectedPriorYear];
+    let list: Array<{ id?: string; accountName: string; amount: number }> = priorData?.costOfSalesBreakdown || [];
+    if ((!list || list.length === 0) && client?.id) {
+      try {
+        const saved = localStorage.getItem(`bir_cogs_breakdown_${client.id}_${selectedPriorYear}`);
+        if (saved) list = JSON.parse(saved);
+      } catch (e) {}
+    }
+    return list;
+  }, [allYearsData, selectedPriorYear, client?.id]);
+
+  // Resolve itemized Deductions accounts for current and prior year
+  const deductionsBreakdownList = useMemo(() => {
+    let list: Array<{ id?: string; accountName: string; amount: number }> = currentData?.itemizedDeductionsBreakdown || [];
+    if ((!list || list.length === 0) && client?.id) {
+      try {
+        const saved = localStorage.getItem(`bir_opex_breakdown_${client.id}_${currentYear}`);
+        if (saved) list = JSON.parse(saved);
+      } catch (e) {}
+    }
+    return list;
+  }, [currentData?.itemizedDeductionsBreakdown, client?.id, currentYear]);
+
+  const priorDeductionsBreakdownList = useMemo(() => {
+    const priorData = allYearsData?.[selectedPriorYear];
+    let list: Array<{ id?: string; accountName: string; amount: number }> = priorData?.itemizedDeductionsBreakdown || [];
+    if ((!list || list.length === 0) && client?.id) {
+      try {
+        const saved = localStorage.getItem(`bir_opex_breakdown_${client.id}_${selectedPriorYear}`);
+        if (saved) list = JSON.parse(saved);
+      } catch (e) {}
+    }
+    return list;
+  }, [allYearsData, selectedPriorYear, client?.id]);
+
   const handleDownloadVariancePdf = async () => {
     try {
       setIsExportingPdf(true);
@@ -278,9 +330,6 @@ export const ComparativeFinancialStatements: React.FC<ComparativeFinancialStatem
                 Multi-Year Analysis
               </span>
             </div>
-            <p className="text-xs text-slate-300 mt-0.5">
-              Navigate previous year statements, track revenue and tax due variance, and analyze financial ratios.
-            </p>
           </div>
         </div>
 
@@ -599,9 +648,29 @@ export const ComparativeFinancialStatements: React.FC<ComparativeFinancialStatem
 
                     {/* Cost of Goods Sold */}
                     <tr className="hover:bg-slate-50/50">
-                      <td className="py-2 px-3 pl-6 text-slate-700">Less: Cost of Goods Sold / Services</td>
+                      <td className="py-2 px-3 text-slate-700">
+                        <div className="flex items-center gap-1.5 pl-1.5">
+                          <button
+                            type="button"
+                            id="btn-toggle-cogs-breakdown"
+                            onClick={() => setIsCogsExpanded(!isCogsExpanded)}
+                            className="p-1 hover:bg-blue-50 text-slate-400 hover:text-blue-700 rounded transition-all cursor-pointer flex items-center justify-center shrink-0"
+                            title={isCogsExpanded ? "Collapse Cost of Goods Sold accounts" : "Click triangle to show individual expense accounts composing Cost of Goods Sold"}
+                            aria-expanded={isCogsExpanded}
+                          >
+                            <span
+                              className={`inline-block text-[10px] transform transition-transform duration-200 ${
+                                isCogsExpanded ? 'rotate-90 text-blue-600 font-bold' : 'text-slate-400'
+                              }`}
+                            >
+                              ▶
+                            </span>
+                          </button>
+                          <span className="font-medium">Less: Cost of Goods Sold / Services</span>
+                        </div>
+                      </td>
                       <td className="py-2 px-2 text-right font-mono text-slate-600">({formatPHP(priorMetrics.costOfSales, false)})</td>
-                      <td className="py-2 px-2 text-right font-mono text-slate-900 bg-blue-50/30">
+                      <td className="py-2 px-2 text-right font-mono text-slate-900 font-semibold bg-blue-50/30">
                         ({formatPHP(currentMetrics.costOfSales, false)})
                       </td>
                       <td className={`py-2 px-2 text-right font-mono ${costDiff <= 0 ? 'text-emerald-700' : 'text-amber-700'}`}>
@@ -619,6 +688,65 @@ export const ComparativeFinancialStatements: React.FC<ComparativeFinancialStatem
                         </span>
                       </td>
                     </tr>
+
+                    {/* Expanded individual COGS accounts */}
+                    {isCogsExpanded && (
+                      <>
+                        {cogsBreakdownList.length === 0 ? (
+                          <tr className="bg-slate-50/70 border-l-2 border-blue-400 text-xs">
+                            <td colSpan={5} className="py-2 px-3 pl-9 text-slate-500 italic">
+                              No individual expense accounts entered yet. Click "Itemized Accounts" in Part II or "Sync to Deductions" in Consolidated Purchases to populate.
+                            </td>
+                          </tr>
+                        ) : (
+                          cogsBreakdownList.map((item, idx) => {
+                            const priorMatch = priorCogsBreakdownList.find(
+                              (p) => p.accountName?.toLowerCase().trim() === item.accountName?.toLowerCase().trim()
+                            );
+                            const priorAmt = priorMatch ? priorMatch.amount : 0;
+                            const currAmt = item.amount || 0;
+                            const diff = currAmt - priorAmt;
+                            const pct = priorAmt > 0 ? ((currAmt - priorAmt) / priorAmt) * 100 : 0;
+
+                            return (
+                              <tr
+                                key={item.id || `cogs_item_${idx}`}
+                                className="bg-blue-50/20 hover:bg-blue-50/40 border-l-2 border-blue-400 text-xs transition-colors"
+                              >
+                                <td className="py-1.5 px-3 pl-8 text-slate-600 font-normal">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-slate-400 text-[11px]">↳</span>
+                                    <span className="truncate">{item.accountName}</span>
+                                  </div>
+                                </td>
+                                <td className="py-1.5 px-2 text-right font-mono text-slate-500">
+                                  {priorAmt > 0 ? `(${formatPHP(priorAmt, false)})` : '—'}
+                                </td>
+                                <td className="py-1.5 px-2 text-right font-mono text-slate-800 font-semibold bg-blue-50/40">
+                                  ({formatPHP(currAmt, false)})
+                                </td>
+                                <td className={`py-1.5 px-2 text-right font-mono ${diff <= 0 ? 'text-emerald-700' : 'text-amber-700'}`}>
+                                  {priorAmt > 0 ? (diff >= 0 ? `+${formatPHP(diff)}` : `-${formatPHP(Math.abs(diff))}`) : '—'}
+                                </td>
+                                <td className="py-1.5 px-3 text-right">
+                                  {priorAmt > 0 ? (
+                                    <span
+                                      className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-mono font-medium ${
+                                        pct <= 0 ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'
+                                      }`}
+                                    >
+                                      {pct >= 0 ? `+${pct.toFixed(1)}%` : `${pct.toFixed(1)}%`}
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-400 font-mono text-[10px]">—</span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </>
+                    )}
 
                     {/* Gross Profit */}
                     <tr className="bg-slate-50/60 font-semibold border-t border-b border-slate-200">
@@ -645,9 +773,29 @@ export const ComparativeFinancialStatements: React.FC<ComparativeFinancialStatem
 
                     {/* Operating Expenses */}
                     <tr className="hover:bg-slate-50/50">
-                      <td className="py-2 px-3 pl-6 text-slate-700">Less: Ordinary Allowable Deductions</td>
+                      <td className="py-2 px-3 text-slate-700">
+                        <div className="flex items-center gap-1.5 pl-1.5">
+                          <button
+                            type="button"
+                            id="btn-toggle-deductions-breakdown"
+                            onClick={() => setIsDeductionsExpanded(!isDeductionsExpanded)}
+                            className="p-1 hover:bg-indigo-50 text-slate-400 hover:text-indigo-700 rounded transition-all cursor-pointer flex items-center justify-center shrink-0"
+                            title={isDeductionsExpanded ? "Collapse Ordinary Allowable Deductions accounts" : "Click triangle to show individual expense accounts composing Ordinary Allowable Deductions"}
+                            aria-expanded={isDeductionsExpanded}
+                          >
+                            <span
+                              className={`inline-block text-[10px] transform transition-transform duration-200 ${
+                                isDeductionsExpanded ? 'rotate-90 text-indigo-600 font-bold' : 'text-slate-400'
+                              }`}
+                            >
+                              ▶
+                            </span>
+                          </button>
+                          <span className="font-medium">Less: Ordinary Allowable Deductions</span>
+                        </div>
+                      </td>
                       <td className="py-2 px-2 text-right font-mono text-slate-600">({formatPHP(priorMetrics.deductions, false)})</td>
-                      <td className="py-2 px-2 text-right font-mono text-slate-900 bg-blue-50/30">
+                      <td className="py-2 px-2 text-right font-mono text-slate-900 font-semibold bg-blue-50/30">
                         ({formatPHP(currentMetrics.deductions, false)})
                       </td>
                       <td className="py-2 px-2 text-right font-mono text-slate-600">
@@ -659,6 +807,65 @@ export const ComparativeFinancialStatements: React.FC<ComparativeFinancialStatem
                           : '—'}
                       </td>
                     </tr>
+
+                    {/* Expanded individual OPEX accounts */}
+                    {isDeductionsExpanded && (
+                      <>
+                        {deductionsBreakdownList.length === 0 ? (
+                          <tr className="bg-slate-50/70 border-l-2 border-indigo-400 text-xs">
+                            <td colSpan={5} className="py-2 px-3 pl-9 text-slate-500 italic">
+                              No individual expense accounts entered yet. Click "Itemized Accounts" in Part II or "Sync to Deductions" in Consolidated Purchases to populate.
+                            </td>
+                          </tr>
+                        ) : (
+                          deductionsBreakdownList.map((item, idx) => {
+                            const priorMatch = priorDeductionsBreakdownList.find(
+                              (p) => p.accountName?.toLowerCase().trim() === item.accountName?.toLowerCase().trim()
+                            );
+                            const priorAmt = priorMatch ? priorMatch.amount : 0;
+                            const currAmt = item.amount || 0;
+                            const diff = currAmt - priorAmt;
+                            const pct = priorAmt > 0 ? ((currAmt - priorAmt) / priorAmt) * 100 : 0;
+
+                            return (
+                              <tr
+                                key={item.id || `ded_item_${idx}`}
+                                className="bg-indigo-50/20 hover:bg-indigo-50/40 border-l-2 border-indigo-400 text-xs transition-colors"
+                              >
+                                <td className="py-1.5 px-3 pl-8 text-slate-600 font-normal">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-slate-400 text-[11px]">↳</span>
+                                    <span className="truncate">{item.accountName}</span>
+                                  </div>
+                                </td>
+                                <td className="py-1.5 px-2 text-right font-mono text-slate-500">
+                                  {priorAmt > 0 ? `(${formatPHP(priorAmt, false)})` : '—'}
+                                </td>
+                                <td className="py-1.5 px-2 text-right font-mono text-slate-800 font-semibold bg-indigo-50/40">
+                                  ({formatPHP(currAmt, false)})
+                                </td>
+                                <td className={`py-1.5 px-2 text-right font-mono ${diff <= 0 ? 'text-emerald-700' : 'text-amber-700'}`}>
+                                  {priorAmt > 0 ? (diff >= 0 ? `+${formatPHP(diff)}` : `-${formatPHP(Math.abs(diff))}`) : '—'}
+                                </td>
+                                <td className="py-1.5 px-3 text-right">
+                                  {priorAmt > 0 ? (
+                                    <span
+                                      className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-mono font-medium ${
+                                        pct <= 0 ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'
+                                      }`}
+                                    >
+                                      {pct >= 0 ? `+${pct.toFixed(1)}%` : `${pct.toFixed(1)}%`}
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-400 font-mono text-[10px]">—</span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </>
+                    )}
 
                     {/* Net Taxable Income */}
                     <tr className="hover:bg-slate-50/50 font-semibold">
@@ -777,7 +984,6 @@ export const ComparativeFinancialStatements: React.FC<ComparativeFinancialStatem
                     {chartMetricMode === 'margins' && 'Gross Margin & Tax Rate Progression'}
                   </span>
                 </div>
-                <span className="text-[11px] text-slate-400 font-mono">4-Year Trajectory</span>
               </div>
 
               {/* Chart container */}

@@ -1916,6 +1916,181 @@ export async function exportComparativeVariancePdf({
     return `<span style="display: inline-block; padding: 1px 5px; border-radius: 4px; font-family: monospace; font-size: 9px; font-weight: 700; background-color: ${bg}; color: ${color};">${sign}${pct.toFixed(1)}%</span>`;
   };
 
+  // Resolve individual expense accounts composing Cost of Goods Sold and Ordinary Allowable Deductions
+  interface ResolvedExpenseSubRow {
+    accountName: string;
+    currAmount: number;
+    selPriorAmount: number;
+    prev2Amount: number;
+    baseAmount: number;
+  }
+
+  // Helper to find or estimate historical amount for a specific expense account
+  const getHistoricalAccountAmount = (
+    year: number,
+    accountName: string,
+    breakdownKey: 'costOfSalesBreakdown' | 'itemizedDeductionsBreakdown',
+    totalCategoryAmount: number,
+    currentTotalAmount: number,
+    currentAccountAmount: number,
+    clientPrefix: 'cogs' | 'opex'
+  ): number => {
+    const yrData = allYearsData[year];
+    if (yrData && Array.isArray(yrData[breakdownKey]) && yrData[breakdownKey].length > 0) {
+      const match = yrData[breakdownKey].find(
+        (a: any) => a.accountName && a.accountName.toLowerCase().trim() === accountName.toLowerCase().trim()
+      );
+      if (match) return match.amount || 0;
+    }
+    // Check localStorage fallback for that historical year
+    if (client?.id) {
+      try {
+        const saved = localStorage.getItem(`bir_${clientPrefix}_breakdown_${client.id}_${year}`);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            const match = parsed.find(
+              (a: any) => a.accountName && a.accountName.toLowerCase().trim() === accountName.toLowerCase().trim()
+            );
+            if (match) return match.amount || 0;
+          }
+        }
+      } catch (e) {}
+    }
+    // Proportional estimate if prior total category amount exists
+    if (currentTotalAmount > 0 && totalCategoryAmount > 0 && currentAccountAmount > 0) {
+      return Math.round((currentAccountAmount / currentTotalAmount) * totalCategoryAmount);
+    }
+    return 0;
+  };
+
+  // 1. Gather COGS accounts
+  let rawCogsBreakdown = currentData?.costOfSalesBreakdown || [];
+  if ((!rawCogsBreakdown || rawCogsBreakdown.length === 0) && client?.id) {
+    try {
+      const saved = localStorage.getItem(`bir_cogs_breakdown_${client.id}_${currentYear}`);
+      if (saved) rawCogsBreakdown = JSON.parse(saved);
+    } catch (e) {}
+  }
+  if ((!rawCogsBreakdown || rawCogsBreakdown.length === 0) && curr.costOfSales > 0) {
+    rawCogsBreakdown = [
+      { id: 'cogs_primary', accountName: 'Merchandise Purchases / Direct Materials', amount: curr.costOfSales },
+    ];
+  }
+
+  const resolvedCogsRows: ResolvedExpenseSubRow[] = (rawCogsBreakdown || []).map((acc: any) => ({
+    accountName: acc.accountName || 'Itemized Direct Cost',
+    currAmount: acc.amount || 0,
+    selPriorAmount: getHistoricalAccountAmount(
+      selectedPriorYear,
+      acc.accountName,
+      'costOfSalesBreakdown',
+      selPrior.costOfSales,
+      curr.costOfSales,
+      acc.amount || 0,
+      'cogs'
+    ),
+    prev2Amount: getHistoricalAccountAmount(
+      currentYear - 2,
+      acc.accountName,
+      'costOfSalesBreakdown',
+      metricsMap[currentYear - 2].costOfSales,
+      curr.costOfSales,
+      acc.amount || 0,
+      'cogs'
+    ),
+    baseAmount: getHistoricalAccountAmount(
+      baseYear,
+      acc.accountName,
+      'costOfSalesBreakdown',
+      base.costOfSales,
+      curr.costOfSales,
+      acc.amount || 0,
+      'cogs'
+    ),
+  }));
+
+  // 2. Gather Deductions accounts
+  let rawDedBreakdown = currentData?.itemizedDeductionsBreakdown || [];
+  if ((!rawDedBreakdown || rawDedBreakdown.length === 0) && client?.id) {
+    try {
+      const saved = localStorage.getItem(`bir_opex_breakdown_${client.id}_${currentYear}`);
+      if (saved) rawDedBreakdown = JSON.parse(saved);
+    } catch (e) {}
+  }
+  if ((!rawDedBreakdown || rawDedBreakdown.length === 0) && curr.deductions > 0) {
+    rawDedBreakdown = [
+      { id: 'opex_primary', accountName: 'Miscellaneous Operating Deductions', amount: curr.deductions },
+    ];
+  }
+
+  const resolvedDedRows: ResolvedExpenseSubRow[] = (rawDedBreakdown || []).map((acc: any) => ({
+    accountName: acc.accountName || 'Itemized Operating Expense',
+    currAmount: acc.amount || 0,
+    selPriorAmount: getHistoricalAccountAmount(
+      selectedPriorYear,
+      acc.accountName,
+      'itemizedDeductionsBreakdown',
+      selPrior.deductions,
+      curr.deductions,
+      acc.amount || 0,
+      'opex'
+    ),
+    prev2Amount: getHistoricalAccountAmount(
+      currentYear - 2,
+      acc.accountName,
+      'itemizedDeductionsBreakdown',
+      metricsMap[currentYear - 2].deductions,
+      curr.deductions,
+      acc.amount || 0,
+      'opex'
+    ),
+    baseAmount: getHistoricalAccountAmount(
+      baseYear,
+      acc.accountName,
+      'itemizedDeductionsBreakdown',
+      base.deductions,
+      curr.deductions,
+      acc.amount || 0,
+      'opex'
+    ),
+  }));
+
+  // Sub-row HTML renderer
+  const renderSubRowsHtml = (rows: ResolvedExpenseSubRow[], rowBg = '#fbfcfe') => {
+    if (!rows || rows.length === 0) return '';
+    return rows
+      .map((r) => {
+        const itemVar = calcVar(r.currAmount, r.selPriorAmount);
+        return `
+          <tr style="border-bottom: 1px dashed #e2e8f0; background-color: ${rowBg}; font-size: 8px;">
+            <td style="padding: 2.5px 8px 2.5px 32px; color: #475569; font-weight: 500;">
+              <span style="color: #94a3b8; margin-right: 5px; font-weight: bold;">↳</span>${r.accountName}
+            </td>
+            <td style="padding: 2.5px 8px; text-align: right; font-family: monospace; color: #64748b;">
+              (${formatPdfCurrency(r.baseAmount, true)})
+            </td>
+            <td style="padding: 2.5px 8px; text-align: right; font-family: monospace; color: #64748b;">
+              (${formatPdfCurrency(r.prev2Amount, true)})
+            </td>
+            <td style="padding: 2.5px 8px; text-align: right; font-family: monospace; color: #475569; background-color: #f8fafc;">
+              (${formatPdfCurrency(r.selPriorAmount, true)})
+            </td>
+            <td style="padding: 2.5px 8px; text-align: right; font-family: monospace; font-weight: 600; color: #0f172a; background-color: #f0f9ff;">
+              (${formatPdfCurrency(r.currAmount, true)})
+            </td>
+            <td style="padding: 2.5px 8px; text-align: right;">
+              ${r.selPriorAmount > 0 ? formatDiffCol(itemVar.diff, true) : '<span style="color: #94a3b8; font-size: 8px;">—</span>'}
+            </td>
+            <td style="padding: 2.5px 8px; text-align: right;">
+              ${r.selPriorAmount > 0 ? formatPctCol(itemVar.pct, true) : '<span style="color: #94a3b8; font-size: 8px;">—</span>'}
+            </td>
+          </tr>
+        `;
+      })
+      .join('');
+  };
+
   const cleanCompName = (client?.registeredName || client?.tradeName || 'Taxpayer')
     .trim()
     .replace(/[^a-zA-Z0-9_-]/g, '_')
@@ -2058,7 +2233,10 @@ export async function exportComparativeVariancePdf({
 
               <!-- Cost of Goods Sold -->
               <tr style="border-bottom: 1px solid #f1f5f9;">
-                <td style="padding: 4px 10px; padding-left: 18px; color: #334155;">Less: Cost of Goods Sold / Services</td>
+                <td style="padding: 4px 10px; padding-left: 18px; color: #334155; font-weight: 600;">
+                  Less: Cost of Goods Sold / Services
+                  ${resolvedCogsRows.length > 0 ? `<span style="font-size: 7.5px; font-weight: 500; color: #64748b; margin-left: 4px;">(${resolvedCogsRows.length} itemized ${resolvedCogsRows.length === 1 ? 'account' : 'accounts'})</span>` : ''}
+                </td>
                 <td style="padding: 4px 8px; text-align: right; font-family: monospace; color: #475569;">(${formatPdfCurrency(base.costOfSales, false)})</td>
                 <td style="padding: 4px 8px; text-align: right; font-family: monospace; color: #475569;">(${formatPdfCurrency(metricsMap[currentYear - 2].costOfSales, false)})</td>
                 <td style="padding: 4px 8px; text-align: right; font-family: monospace; color: #334155; background-color: #f8fafc;">(${formatPdfCurrency(selPrior.costOfSales, false)})</td>
@@ -2066,6 +2244,7 @@ export async function exportComparativeVariancePdf({
                 <td style="padding: 4px 8px; text-align: right;">${formatDiffCol(costVar.diff, true)}</td>
                 <td style="padding: 4px 8px; text-align: right;">${formatPctCol(costVar.pct, true)}</td>
               </tr>
+              ${renderSubRowsHtml(resolvedCogsRows, '#f8fafc')}
 
               <!-- Gross Profit -->
               <tr style="border-top: 1px solid #cbd5e1; border-bottom: 1px solid #cbd5e1; background-color: #f0fdf4; font-weight: 800;">
@@ -2080,7 +2259,10 @@ export async function exportComparativeVariancePdf({
 
               <!-- Operating Deductions -->
               <tr style="border-bottom: 1px solid #f1f5f9;">
-                <td style="padding: 4px 10px; padding-left: 18px; color: #334155;">Less: Allowable Deductions (Itemized / OSD)</td>
+                <td style="padding: 4px 10px; padding-left: 18px; color: #334155; font-weight: 600;">
+                  Less: Allowable Deductions (Itemized / OSD)
+                  ${resolvedDedRows.length > 0 ? `<span style="font-size: 7.5px; font-weight: 500; color: #64748b; margin-left: 4px;">(${resolvedDedRows.length} itemized ${resolvedDedRows.length === 1 ? 'account' : 'accounts'})</span>` : ''}
+                </td>
                 <td style="padding: 4px 8px; text-align: right; font-family: monospace; color: #475569;">(${formatPdfCurrency(base.deductions, false)})</td>
                 <td style="padding: 4px 8px; text-align: right; font-family: monospace; color: #475569;">(${formatPdfCurrency(metricsMap[currentYear - 2].deductions, false)})</td>
                 <td style="padding: 4px 8px; text-align: right; font-family: monospace; color: #334155; background-color: #f8fafc;">(${formatPdfCurrency(selPrior.deductions, false)})</td>
@@ -2088,6 +2270,7 @@ export async function exportComparativeVariancePdf({
                 <td style="padding: 4px 8px; text-align: right;">${formatDiffCol(dedVar.diff, true)}</td>
                 <td style="padding: 4px 8px; text-align: right;">${formatPctCol(dedVar.pct, true)}</td>
               </tr>
+              ${renderSubRowsHtml(resolvedDedRows, '#faf5ff')}
 
               <!-- Net Taxable Income -->
               <tr style="border-bottom: 1px solid #cbd5e1; background-color: #eff6ff; font-weight: 700;">
@@ -2248,17 +2431,317 @@ export async function exportComparativeVariancePdf({
       logging: false,
     });
 
+    const pdfWidth = 297;
+    const computedHeight = (canvas.height * pdfWidth) / canvas.width;
+
     const pdf = new jsPDF({
       orientation: 'landscape',
       unit: 'mm',
-      format: 'a4',
+      format: computedHeight > 210 ? [pdfWidth, computedHeight] : 'a4',
       compress: true,
     });
 
     const imgData = canvas.toDataURL('image/png');
-    pdf.addImage(imgData, 'PNG', 0, 0, 297, 210, undefined, 'FAST');
+    pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, Math.max(210, computedHeight), undefined, 'FAST');
 
     pdf.save(`${is1701 ? 'BIR_1701' : 'BIR_1702'}_Comparative_Variance_${cleanCompName}_TY${currentYear}.pdf`);
+  } finally {
+    if (document.body.contains(container)) {
+      document.body.removeChild(container);
+    }
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Official BIR Consolidated Purchases (Q1–Q4) Schedule PDF Export
+// -----------------------------------------------------------------------------
+export interface ConsolidatedPurchasesPdfOptions {
+  client: ClientProfile;
+  year: number;
+  suppliers: Array<{
+    registeredName: string;
+    tin: string;
+    address?: string;
+    totalGrossAmount: number;
+    totalTaxableAmount: number;
+    totalInputTax: number;
+    costType?: 'direct_cost' | 'operating_expense' | 'unclassified';
+    expenseAccount?: string;
+    quarterlyBreakdown?: {
+      Q1: { gross: number; taxable: number; inputTax: number; count: number };
+      Q2: { gross: number; taxable: number; inputTax: number; count: number };
+      Q3: { gross: number; taxable: number; inputTax: number; count: number };
+      Q4: { gross: number; taxable: number; inputTax: number; count: number };
+    };
+  }>;
+  classificationTotals: {
+    directCostGross: number;
+    directCostTaxable: number;
+    opexGross: number;
+    opexTaxable: number;
+    unclassifiedGross: number;
+  };
+  overallTotals: {
+    totalGrossAmount: number;
+    totalTaxableAmount: number;
+    totalInputTax: number;
+  };
+}
+
+export async function exportConsolidatedPurchasesPdf(options: ConsolidatedPurchasesPdfOptions): Promise<void> {
+  const { client, year, suppliers, classificationTotals, overallTotals } = options;
+
+  const container = document.createElement('div');
+  container.style.position = 'absolute';
+  container.style.left = '-9999px';
+  container.style.top = '0';
+  container.style.width = '1180px';
+  container.style.backgroundColor = '#ffffff';
+  container.style.zIndex = '-1000';
+  container.style.fontFamily = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+
+  const cleanCompName = (client?.registeredName || client?.tradeName || 'Taxpayer')
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, '_')
+    .replace(/_+/g, '_');
+
+  const reportDate = new Date().toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+
+  const supplierRowsHtml = suppliers.length === 0
+    ? `<tr><td colspan="10" style="padding: 16px; text-align: center; color: #64748b; font-style: italic;">No consolidated purchases recorded for TY ${year}.</td></tr>`
+    : suppliers
+        .map((s, idx) => {
+          const isDirect = s.costType === 'direct_cost';
+          const isOpex = s.costType === 'operating_expense';
+          const badgeBg = isDirect ? '#eff6ff' : isOpex ? '#faf5ff' : '#f1f5f9';
+          const badgeColor = isDirect ? '#1e40af' : isOpex ? '#6b21a8' : '#475569';
+          const badgeLabel = isDirect ? 'Direct Cost' : isOpex ? 'Operating Exp' : 'Unclassified';
+
+          const q1 = s.quarterlyBreakdown?.Q1?.gross || 0;
+          const q2 = s.quarterlyBreakdown?.Q2?.gross || 0;
+          const q3 = s.quarterlyBreakdown?.Q3?.gross || 0;
+          const q4 = s.quarterlyBreakdown?.Q4?.gross || 0;
+
+          return `
+            <tr style="border-bottom: 1px solid #e2e8f0; font-size: 8.5px; ${idx % 2 === 1 ? 'background-color: #fafbfc;' : ''}">
+              <td style="padding: 4px 6px; text-align: center; color: #94a3b8; font-family: monospace;">${idx + 1}</td>
+              <td style="padding: 4px 8px; font-weight: 600; color: #0f172a;">
+                <div>${s.registeredName}</div>
+                <div style="font-size: 7.5px; font-family: monospace; color: #64748b;">TIN: ${s.tin || 'N/A'}</div>
+              </td>
+              <td style="padding: 4px 6px; text-align: center;">
+                <span style="display: inline-block; padding: 1.5px 5px; border-radius: 4px; font-size: 8px; font-weight: 700; background-color: ${badgeBg}; color: ${badgeColor};">
+                  ${badgeLabel}
+                </span>
+              </td>
+              <td style="padding: 4px 8px; color: #334155; font-size: 8px;">
+                ${s.expenseAccount || '<span style="color: #94a3b8;">Unspecified</span>'}
+              </td>
+              <td style="padding: 4px 6px; text-align: right; font-family: monospace; color: #475569;">${formatPdfCurrency(q1, true)}</td>
+              <td style="padding: 4px 6px; text-align: right; font-family: monospace; color: #475569;">${formatPdfCurrency(q2, true)}</td>
+              <td style="padding: 4px 6px; text-align: right; font-family: monospace; color: #475569;">${formatPdfCurrency(q3, true)}</td>
+              <td style="padding: 4px 6px; text-align: right; font-family: monospace; color: #475569;">${formatPdfCurrency(q4, true)}</td>
+              <td style="padding: 4px 8px; text-align: right; font-family: monospace; font-weight: 600; color: #0f172a; background-color: #f8fafc;">
+                ${formatPdfCurrency(s.totalTaxableAmount)}
+              </td>
+              <td style="padding: 4px 8px; text-align: right; font-family: monospace; font-weight: 600; color: #047857; background-color: #f0fdf4;">
+                ${formatPdfCurrency(s.totalInputTax)}
+              </td>
+              <td style="padding: 4px 8px; text-align: right; font-family: monospace; font-weight: 800; color: #1e3a8a; background-color: #eff6ff;">
+                ${formatPdfCurrency(s.totalGrossAmount)}
+              </td>
+            </tr>
+          `;
+        })
+        .join('');
+
+  container.innerHTML = `
+    <div id="pdf-consolidated-purchases-page" style="width: 1180px; min-height: 800px; padding: 22px 30px; background-color: #ffffff; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between;">
+      <div>
+        <!-- BIR Header -->
+        <div style="border-bottom: 2px solid #0f172a; padding-bottom: 8px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: flex-start;">
+          <div>
+            <div style="font-size: 8.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: #1e40af;">
+              REPUBLIC OF THE PHILIPPINES • BUREAU OF INTERNAL REVENUE
+            </div>
+            <div style="font-size: 15px; font-weight: 900; color: #0f172a; letter-spacing: -0.3px; margin: 1px 0;">
+              ANNUAL CONSOLIDATED PURCHASES & SUPPLIER SCHEDULE (Q1–Q4)
+            </div>
+            <div style="font-size: 9.5px; color: #475569;">
+              Combined Quarterly Summary of Local Purchases, Expense Classifications & Input Taxes
+            </div>
+          </div>
+          <div style="text-align: right;">
+            <div style="display: inline-block; padding: 3px 9px; background-color: #0f172a; color: #ffffff; font-size: 11px; font-weight: 900; border-radius: 4px; font-family: monospace;">
+              TAXABLE YEAR ${year}
+            </div>
+            <div style="font-size: 8.5px; color: #64748b; margin-top: 3px;">
+              Form 1701 / 1702-RT Deduction Schedule
+            </div>
+          </div>
+        </div>
+
+        <!-- Taxpayer Identity Strip -->
+        <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 7px 12px; margin-bottom: 12px; display: grid; grid-template-columns: 2fr 1.2fr 1.2fr 1fr; gap: 8px; font-size: 9px;">
+          <div>
+            <div style="font-size: 7.5px; text-transform: uppercase; font-weight: 700; color: #64748b;">Taxpayer Registered Name</div>
+            <div style="font-weight: 800; color: #0f172a; font-size: 10px;">${client.registeredName || 'N/A'}</div>
+          </div>
+          <div>
+            <div style="font-size: 7.5px; text-transform: uppercase; font-weight: 700; color: #64748b;">Taxpayer Identification No. (TIN)</div>
+            <div style="font-family: monospace; font-weight: 800; color: #1e3a8a;">${client.tin}</div>
+          </div>
+          <div>
+            <div style="font-size: 7.5px; text-transform: uppercase; font-weight: 700; color: #64748b;">Tax Classification / VAT Status</div>
+            <div style="font-weight: 700; color: #047857;">VAT-Registered Taxpayer • 12% Input Tax</div>
+          </div>
+          <div>
+            <div style="font-size: 7.5px; text-transform: uppercase; font-weight: 700; color: #64748b;">Total Suppliers</div>
+            <div style="font-weight: 800; color: #0f172a;">${suppliers.length} Combined Entity(ies)</div>
+          </div>
+        </div>
+
+        <!-- 4 KPI Summary Cards -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 10px; margin-bottom: 12px;">
+          <div style="background-color: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; padding: 7px 10px;">
+            <div style="font-size: 7.5px; font-weight: 700; text-transform: uppercase; color: #1e40af;">Total Combined Gross Purchases</div>
+            <div style="font-size: 13px; font-weight: 900; font-family: monospace; color: #172554; margin: 2px 0;">
+              ${formatPdfCurrency(overallTotals.totalGrossAmount)}
+            </div>
+            <div style="font-size: 7.5px; color: #3b82f6;">All invoices across Q1–Q4 combined</div>
+          </div>
+
+          <div style="background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 7px 10px;">
+            <div style="font-size: 7.5px; font-weight: 700; text-transform: uppercase; color: #15803d;">Direct Cost / COGS (Net of VAT)</div>
+            <div style="font-size: 13px; font-weight: 900; font-family: monospace; color: #14532d; margin: 2px 0;">
+              ${formatPdfCurrency(classificationTotals.directCostTaxable)}
+            </div>
+            <div style="font-size: 7.5px; color: #16a34a;">Reflected in Part II Cost of Sales</div>
+          </div>
+
+          <div style="background-color: #faf5ff; border: 1px solid #e9d5ff; border-radius: 6px; padding: 7px 10px;">
+            <div style="font-size: 7.5px; font-weight: 700; text-transform: uppercase; color: #7e22ce;">Operating Expenses (Net of VAT)</div>
+            <div style="font-size: 13px; font-weight: 900; font-family: monospace; color: #581c87; margin: 2px 0;">
+              ${formatPdfCurrency(classificationTotals.opexTaxable)}
+            </div>
+            <div style="font-size: 7.5px; color: #9333ea;">Reflected in Part II Itemized Deductions</div>
+          </div>
+
+          <div style="background-color: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 6px; padding: 7px 10px;">
+            <div style="font-size: 7.5px; font-weight: 700; text-transform: uppercase; color: #047857;">Total Creditable Input Tax (12%)</div>
+            <div style="font-size: 13px; font-weight: 900; font-family: monospace; color: #064e3b; margin: 2px 0;">
+              ${formatPdfCurrency(overallTotals.totalInputTax)}
+            </div>
+            <div style="font-size: 7.5px; color: #059669;">Claimable on Quarterly 2550Q Returns</div>
+          </div>
+        </div>
+
+        <!-- Consolidated Table -->
+        <div style="border: 1px solid #cbd5e1; border-radius: 6px; overflow: hidden; margin-bottom: 12px;">
+          <table style="width: 100%; border-collapse: collapse; font-size: 8.5px;">
+            <thead>
+              <tr style="background-color: #0f172a; color: #ffffff; font-size: 8px; text-transform: uppercase; letter-spacing: 0.4px;">
+                <th style="padding: 5px 6px; text-align: center; width: 28px;">#</th>
+                <th style="padding: 5px 8px; text-align: left;">Supplier Registered Name & TIN</th>
+                <th style="padding: 5px 6px; text-align: center; width: 85px;">Classification</th>
+                <th style="padding: 5px 8px; text-align: left; width: 140px;">Expense Account</th>
+                <th style="padding: 5px 6px; text-align: right; width: 68px;">Q1 Gross</th>
+                <th style="padding: 5px 6px; text-align: right; width: 68px;">Q2 Gross</th>
+                <th style="padding: 5px 6px; text-align: right; width: 68px;">Q3 Gross</th>
+                <th style="padding: 5px 6px; text-align: right; width: 68px;">Q4 Gross</th>
+                <th style="padding: 5px 8px; text-align: right; width: 85px; background-color: #1e293b;">Net Taxable</th>
+                <th style="padding: 5px 8px; text-align: right; width: 80px; background-color: #064e3b;">Input VAT (12%)</th>
+                <th style="padding: 5px 8px; text-align: right; width: 90px; background-color: #1e3a8a;">Total Gross</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${supplierRowsHtml}
+
+              <!-- Overall Totals Row -->
+              <tr style="border-top: 2px solid #0f172a; background-color: #f1f5f9; font-weight: 900; font-size: 9px;">
+                <td style="padding: 6px 6px; text-align: center;">Σ</td>
+                <td style="padding: 6px 8px; color: #0f172a;">GRAND TOTALS (Q1–Q4 CONSOLIDATED)</td>
+                <td style="padding: 6px 6px; text-align: center; color: #475569;">${suppliers.length} Suppliers</td>
+                <td style="padding: 6px 8px; color: #64748b;">Annual Purchases Schedule</td>
+                <td style="padding: 6px 6px; text-align: right; font-family: monospace;">—</td>
+                <td style="padding: 6px 6px; text-align: right; font-family: monospace;">—</td>
+                <td style="padding: 6px 6px; text-align: right; font-family: monospace;">—</td>
+                <td style="padding: 6px 6px; text-align: right; font-family: monospace;">—</td>
+                <td style="padding: 6px 8px; text-align: right; font-family: monospace; color: #0f172a; background-color: #e2e8f0;">
+                  ${formatPdfCurrency(overallTotals.totalTaxableAmount)}
+                </td>
+                <td style="padding: 6px 8px; text-align: right; font-family: monospace; color: #065f46; background-color: #bbf7d0;">
+                  ${formatPdfCurrency(overallTotals.totalInputTax)}
+                </td>
+                <td style="padding: 6px 8px; text-align: right; font-family: monospace; color: #1e3a8a; background-color: #bae6fd;">
+                  ${formatPdfCurrency(overallTotals.totalGrossAmount)}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Statutory Footnote -->
+        <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 10px; font-size: 8px; color: #475569; margin-bottom: 10px;">
+          <div><strong>BIR Compliance & Audit Note:</strong> In Philippine tax practice, input VAT credited on quarterly VAT returns (BIR Form 2550Q) is excluded from annual deductible income tax expenses. The Net Taxable amounts above represent allowable deductions for Cost of Goods Sold/Services (NIRC Sec. 34/27) and Ordinary Allowable Itemized Deductions. All transactions are supported by official VAT invoices/receipts compliant with the Ease of Paying Taxes (eOPT) Act (RA 11976).</div>
+        </div>
+      </div>
+
+      <!-- Signatures Footer -->
+      <div style="border-top: 1px solid #cbd5e1; padding-top: 8px; font-size: 8.5px; color: #64748b; display: flex; justify-content: space-between; align-items: flex-end;">
+        <div>
+          <div><strong>BIR Tax Return Calculator & Consolidated Purchases Schedule</strong> • RA 11976 (eOPT Act)</div>
+          <div>Report Generated: ${reportDate} • Document Reference: BIR-PURCHASES-TY${year}-${cleanCompName}</div>
+        </div>
+        <div style="display: flex; gap: 36px; text-align: center;">
+          <div>
+            <div style="width: 150px; border-bottom: 1px solid #94a3b8; margin-bottom: 3px;"></div>
+            <div style="font-weight: 700; color: #0f172a;">${client.registeredName ? 'Authorized Signatory' : 'Taxpayer / Finance Head'}</div>
+            <div style="font-size: 7.5px; color: #64748b;">Prepared By / Taxpayer</div>
+          </div>
+          <div>
+            <div style="width: 150px; border-bottom: 1px solid #94a3b8; margin-bottom: 3px;"></div>
+            <div style="font-weight: 700; color: #0f172a;">Certified Public Accountant</div>
+            <div style="font-size: 7.5px; color: #64748b;">Certified Correct (Auditor / Tax Agent)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(container);
+
+  try {
+    const pageEl = container.querySelector('#pdf-consolidated-purchases-page') as HTMLElement;
+    if (!pageEl) {
+      throw new Error('Failed to locate PDF consolidated purchases container element');
+    }
+
+    const canvas = await html2canvas(pageEl, {
+      scale: 2,
+      useCORS: true,
+      backgroundColor: '#ffffff',
+      logging: false,
+    });
+
+    const pdfWidth = 297;
+    const computedHeight = (canvas.height * pdfWidth) / canvas.width;
+
+    const pdf = new jsPDF({
+      orientation: 'landscape',
+      unit: 'mm',
+      format: computedHeight > 210 ? [pdfWidth, computedHeight] : 'a4',
+      compress: true,
+    });
+
+    const imgData = canvas.toDataURL('image/png');
+    pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, Math.max(210, computedHeight), undefined, 'FAST');
+
+    pdf.save(`BIR_Consolidated_Purchases_${cleanCompName}_TY${year}.pdf`);
   } finally {
     if (document.body.contains(container)) {
       document.body.removeChild(container);

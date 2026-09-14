@@ -21,7 +21,7 @@ import {
   INITIAL_DATA_1601EQ,
 } from './data/defaultClients';
 import { ClientHeader } from './components/ClientHeader';
-import { getRealTimeTaxPeriod } from './utils/taxCalculations';
+import { getRealTimeTaxPeriod, calculate1701Q, calculate1702Q } from './utils/taxCalculations';
 import { ClientModal } from './components/ClientModal';
 import { Form1701QView } from './components/Form1701QView';
 import { Form1702QView } from './components/Form1702QView';
@@ -731,6 +731,12 @@ export default function App() {
     const q3 = getQ('Q3');
     const q4 = getQ('Q4');
 
+    const calc1701QPaid = (qData?: Data1701Q): number => {
+      if (!qData) return 0;
+      const res = calculate1701Q(qData);
+      return res.netTaxPayable > 0 ? Math.round(res.netTaxPayable) : 0;
+    };
+
     return {
       q1Sales: q1SalesVal,
       q2Sales: q2SalesVal,
@@ -738,9 +744,9 @@ export default function App() {
       q4Sales: q4SalesVal,
       totalSales: totalSalesVal,
       sourceForm: unlockedSalesForm,
-      q1TaxPaid: Number(q1?.quarterlyTaxPaidPriorQuarters) || 0,
-      q2TaxPaid: Number(q2?.quarterlyTaxPaidPriorQuarters) || 0,
-      q3TaxPaid: Number(q3?.quarterlyTaxPaidPriorQuarters) || 0,
+      q1TaxPaid: calc1701QPaid(q1),
+      q2TaxPaid: calc1701QPaid(q2),
+      q3TaxPaid: calc1701QPaid(q3),
       totalCwt:
         (Number(q1?.cwt2307Credits) || 0) +
         (Number(q2?.cwt2307Credits) || 0) +
@@ -835,6 +841,12 @@ export default function App() {
     const q3 = getQ('Q3');
     const q4 = getQ('Q4');
 
+    const calc1702QPaid = (qData?: Data1702Q): number => {
+      if (!qData) return 0;
+      const res = calculate1702Q(qData);
+      return res.netTaxPayable > 0 ? Math.round(res.netTaxPayable) : 0;
+    };
+
     return {
       q1Sales: q1SalesVal,
       q2Sales: q2SalesVal,
@@ -842,9 +854,9 @@ export default function App() {
       q4Sales: q4SalesVal,
       totalSales: totalSalesVal,
       sourceForm: unlockedSalesForm,
-      q1TaxPaid: Number(q1?.priorQuarterTaxPaid) || 0,
-      q2TaxPaid: Number(q2?.priorQuarterTaxPaid) || 0,
-      q3TaxPaid: Number(q3?.priorQuarterTaxPaid) || 0,
+      q1TaxPaid: calc1702QPaid(q1),
+      q2TaxPaid: calc1702QPaid(q2),
+      q3TaxPaid: calc1702QPaid(q3),
       totalCwt:
         (Number(q1?.cwt2307Credits) || 0) +
         (Number(q2?.cwt2307Credits) || 0) +
