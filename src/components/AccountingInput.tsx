@@ -38,11 +38,10 @@ export const AccountingInput: React.FC<AccountingInputProps> = ({
     }
   }, [value, isFocused]);
 
-  const handleFocus = () => {
+  const handleFocus = (e: React.FocusEvent<HTMLInputElement>) => {
     setIsFocused(true);
-    const num = typeof value === 'number' && !isNaN(value) ? value : 0;
-    // When focusing, if it's 0, present an empty string or raw number for swift entry
-    setInputValue(num === 0 ? '' : num.toString());
+    // Auto-select text on focus so user can immediately overwrite, while preserving full accounting format
+    e.target.select();
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {

@@ -84,10 +84,10 @@ export const TaxDeadlineCalendar: React.FC<TaxDeadlineCalendarProps> = ({
     return list;
   }, [currentRealYear]);
 
-  // Get all deadlines for the selected month and year
+  // Get all deadlines for the selected month and year (adjusted for client if client filter is active)
   const allMonthDeadlines = useMemo(() => {
-    return getBirDeadlinesForMonth(selectedYear, selectedMonth);
-  }, [selectedYear, selectedMonth]);
+    return getBirDeadlinesForMonth(selectedYear, selectedMonth, clientFilterOnly ? activeClient : null);
+  }, [selectedYear, selectedMonth, clientFilterOnly, activeClient]);
 
   // Filtered list based on active client
   const displayedDeadlines = useMemo(() => {
@@ -472,10 +472,19 @@ export const TaxDeadlineCalendar: React.FC<TaxDeadlineCalendarProps> = ({
 
           {/* Active Client Context Tip */}
           {activeClient && (
-            <div className="text-xs text-slate-500 flex items-center gap-2">
+            <div className="text-xs text-slate-500 flex items-center gap-2 flex-wrap">
               <span>Client:</span>
               <strong className="text-slate-800">{activeClient.registeredName}</strong>
               <span className="text-slate-400 font-mono">({activeClient.classification})</span>
+              {activeClient.taxableYearType === 'fiscal' ? (
+                <span className="px-2 py-0.5 text-[11px] font-semibold bg-amber-50 text-amber-800 rounded-md border border-amber-300">
+                  Fiscal Year (Ending {MONTH_NAMES[(activeClient.fiscalYearEndMonth || 12) - 1]})
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 text-[11px] font-semibold bg-slate-100 text-slate-700 rounded-md border border-slate-200">
+                  Calendar Year (Ending Dec 31)
+                </span>
+              )}
             </div>
           )}
         </div>

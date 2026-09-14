@@ -504,6 +504,22 @@ export const Form1702AnnualView: React.FC<Form1702AnnualViewProps> = ({
                   </span>
                 </div>
               )}
+
+              {/* Part II Accounting Subtotals */}
+              <div className="pt-3 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs bg-slate-50/70 p-3 rounded-lg font-mono">
+                <div className="flex items-center gap-2">
+                  <span className="font-sans font-semibold text-slate-700">Part II Net Sales:</span>
+                  <span className="font-bold text-slate-900">
+                    ₱{formatPHP(result.netSales || 0, false)}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="font-sans font-semibold text-slate-700">Part II Total Gross Income:</span>
+                  <span className="font-bold text-blue-700">
+                    ₱{formatPHP(result.totalGrossIncome || 0, false)}
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -670,21 +686,9 @@ export const Form1702AnnualView: React.FC<Form1702AnnualViewProps> = ({
               </div>
 
               <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs font-medium text-slate-700">
-                    Form 2307 CWT (Full Year)
-                  </label>
-                  <button
-                    id="upload-sawt-cwt-btn"
-                    type="button"
-                    onClick={() => setShowSawtModal(true)}
-                    className="flex items-center gap-1 text-[11px] font-semibold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 px-1.5 py-0.5 rounded cursor-pointer transition-colors"
-                    title="Upload SAWT Excel file to automatically calculate Form 2307 CWT (Full Year)"
-                  >
-                    <FileSpreadsheet className="w-3 h-3 text-emerald-600" />
-                    <span>{sawtSummary ? 'SAWT' : 'Upload SAWT'}</span>
-                  </button>
-                </div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">
+                  Form 2307 CWT (Full Year)
+                </label>
                 <div className="relative">
                   <span className="absolute left-3 top-2 text-xs text-slate-400 font-mono">₱</span>
                   <AccountingInput
@@ -711,7 +715,7 @@ export const Form1702AnnualView: React.FC<Form1702AnnualViewProps> = ({
                   </div>
                 ) : (
                   <div className="text-[10px] text-slate-400 mt-1">
-                    Direct entry or upload SAWT
+                    Direct entry
                   </div>
                 )}
               </div>
@@ -747,6 +751,16 @@ export const Form1702AnnualView: React.FC<Form1702AnnualViewProps> = ({
                   />
                 </div>
               </div>
+            </div>
+
+            {/* Part III Total Credits Accounting Summary */}
+            <div className="pt-3 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs bg-blue-50/60 p-3 rounded-lg border border-blue-100 font-mono">
+              <span className="font-sans font-bold uppercase tracking-wider text-blue-900 text-[11px]">
+                Total Part III Tax Credits & Payments:
+              </span>
+              <span className="font-bold text-sm text-blue-700">
+                ₱{formatPHP(result.totalTaxCredits || 0, false)}
+              </span>
             </div>
           </div>
         </div>

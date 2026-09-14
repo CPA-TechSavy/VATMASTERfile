@@ -5,6 +5,7 @@ import { formatPHP, parseNumber } from '../utils/formatters';
 import { AlertTriangle, Users, Save, CheckCircle2, Calendar, Calculator } from 'lucide-react';
 import { PenaltiesModal } from './PenaltiesModal';
 import { Cumulative1601CModal } from './Cumulative1601CModal';
+import { AccountingInput } from './AccountingInput';
 
 interface Form1601CViewProps {
   client: ClientProfile;
@@ -138,13 +139,12 @@ export const Form1601CView: React.FC<Form1601CViewProps> = ({
               </div>
               <div className="relative w-full sm:w-60">
                 <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
-                <input
+                <AccountingInput
                   id="gross-comp-1601c"
-                  type="number"
-                  value={data.totalGrossCompensation || ''}
-                  onChange={(e) => updateField('totalGrossCompensation', parseNumber(e.target.value))}
+                  value={data.totalGrossCompensation}
+                  onChange={(val) => updateField('totalGrossCompensation', val)}
                   placeholder="0.00"
-                  className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500"
+                  className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 bg-white"
                 />
               </div>
             </div>
@@ -164,13 +164,12 @@ export const Form1601CView: React.FC<Form1601CViewProps> = ({
                 </div>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInput
                     id="smw-comp-1601c"
-                    type="number"
-                    value={data.minimumWageEarners || ''}
-                    onChange={(e) => updateField('minimumWageEarners', parseNumber(e.target.value))}
+                    value={data.minimumWageEarners}
+                    onChange={(val) => updateField('minimumWageEarners', val)}
                     placeholder="0.00"
-                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500"
+                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 bg-white"
                   />
                 </div>
               </div>
@@ -182,13 +181,12 @@ export const Form1601CView: React.FC<Form1601CViewProps> = ({
                 </div>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInput
                     id="statutory-contrib-1601c"
-                    type="number"
-                    value={data.statutoryContributions || ''}
-                    onChange={(e) => updateField('statutoryContributions', parseNumber(e.target.value))}
+                    value={data.statutoryContributions}
+                    onChange={(val) => updateField('statutoryContributions', val)}
                     placeholder="0.00"
-                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500"
+                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 bg-white"
                   />
                 </div>
               </div>
@@ -200,13 +198,12 @@ export const Form1601CView: React.FC<Form1601CViewProps> = ({
                 </div>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInput
                     id="thirteenth-month-1601c"
-                    type="number"
-                    value={data.thirteenthMonthAndDeMinimis || ''}
-                    onChange={(e) => updateField('thirteenthMonthAndDeMinimis', parseNumber(e.target.value))}
+                    value={data.thirteenthMonthAndDeMinimis}
+                    onChange={(val) => updateField('thirteenthMonthAndDeMinimis', val)}
                     placeholder="0.00"
-                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500"
+                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 bg-white"
                   />
                 </div>
               </div>
@@ -215,13 +212,12 @@ export const Form1601CView: React.FC<Form1601CViewProps> = ({
                 <label className="text-sm text-slate-700">Other Non-Taxable Compensation</label>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInput
                     id="other-nontax-1601c"
-                    type="number"
-                    value={data.otherNonTaxableCompensation || ''}
-                    onChange={(e) => updateField('otherNonTaxableCompensation', parseNumber(e.target.value))}
+                    value={data.otherNonTaxableCompensation}
+                    onChange={(val) => updateField('otherNonTaxableCompensation', val)}
                     placeholder="0.00"
-                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500"
+                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 bg-white"
                   />
                 </div>
               </div>
@@ -239,13 +235,12 @@ export const Form1601CView: React.FC<Form1601CViewProps> = ({
                 <label className="text-sm text-slate-700">Tax Adjustments (Prior Months)</label>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInput
                     id="adjustments-1601c"
-                    type="number"
-                    value={data.taxWithheldAdjustments || ''}
-                    onChange={(e) => updateField('taxWithheldAdjustments', parseNumber(e.target.value))}
+                    value={data.taxWithheldAdjustments}
+                    onChange={(val) => updateField('taxWithheldAdjustments', val)}
                     placeholder="0.00"
-                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500"
+                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 bg-white"
                   />
                 </div>
               </div>
@@ -254,13 +249,12 @@ export const Form1601CView: React.FC<Form1601CViewProps> = ({
                 <label className="text-sm text-slate-700">Tax Remitted in Previous Return (if amended)</label>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInput
                     id="prev-remitted-1601c"
-                    type="number"
-                    value={data.taxRemittedPreviously || ''}
-                    onChange={(e) => updateField('taxRemittedPreviously', parseNumber(e.target.value))}
+                    value={data.taxRemittedPreviously}
+                    onChange={(val) => updateField('taxRemittedPreviously', val)}
                     placeholder="0.00"
-                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500"
+                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 bg-white"
                   />
                 </div>
               </div>

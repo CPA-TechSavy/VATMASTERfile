@@ -6,6 +6,8 @@ export type TaxClassification =
 
 export type VatStatus = 'vat-registered' | 'non-vat';
 
+export type TaxableYearType = 'calendar' | 'fiscal';
+
 export interface ClientProfile {
   id: string;
   tradeName: string;
@@ -17,6 +19,8 @@ export interface ClientProfile {
   isWithholdingAgent: boolean;
   hasBranches?: boolean; // Client has branches or is a single unit / no branch
   notes?: string;
+  taxableYearType?: TaxableYearType; // 'calendar' (default) or 'fiscal'
+  fiscalYearEndMonth?: number; // 1 to 12. Default is 12 (December 31)
 }
 
 export type Quarter = 'Q1' | 'Q2' | 'Q3' | 'Q4';

@@ -31,7 +31,7 @@ interface ClientHeaderProps {
   onSelectMonth: (m: number) => void;
   year: number;
   onSelectYear: (y: number) => void;
-  onExportData: () => void;
+  onExportData?: () => void;
   onImportData?: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onOpenCalendar?: () => void;
 }
@@ -322,18 +322,6 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
 
             {/* PC Download / Install PWA Button */}
             <InstallButton />
-
-            {/* Backup / Export */}
-            <div className="flex items-center gap-1 border-l border-slate-200 pl-2">
-              <button
-                id="export-tax-backup-btn"
-                onClick={onExportData}
-                title="Export Clients & Calculations to JSON"
-                className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors"
-              >
-                <Download className="w-4 h-4" />
-              </button>
-            </div>
           </div>
         </div>
 

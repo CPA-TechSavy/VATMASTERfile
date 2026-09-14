@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Plus, Trash2, Calculator, Check, AlertCircle } from 'lucide-react';
 import { ExpenseAccountItem } from '../types/tax';
 import { formatPHP } from '../utils/formatters';
+import { AccountingInput } from './AccountingInput';
 
 interface ExpenseBreakdownModalProps {
   isOpen: boolean;
@@ -204,14 +205,10 @@ export const ExpenseBreakdownModal: React.FC<ExpenseBreakdownModalProps> = ({
                   </div>
                   <div className="col-span-4 sm:col-span-3 relative">
                     <span className="absolute left-2.5 top-1.5 text-xs text-slate-400 font-mono">₱</span>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={item.amount || ''}
-                      onChange={(e) =>
-                        handleUpdateItem(item.id, 'amount', parseFloat(e.target.value) || 0)
-                      }
+                    <AccountingInput
+                      id={`breakdown-item-${item.id}`}
+                      value={item.amount}
+                      onChange={(val) => handleUpdateItem(item.id, 'amount', val)}
                       placeholder="0.00"
                       className="w-full pl-6 pr-2.5 py-1.5 text-xs font-mono text-right bg-white border border-slate-300 rounded-md focus:ring-1 focus:ring-blue-500"
                     />

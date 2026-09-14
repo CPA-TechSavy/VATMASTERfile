@@ -275,7 +275,7 @@ export const Form2551QView: React.FC<Form2551QViewProps> = ({
                     Combined Gross Sales / Receipts
                   </div>
                   <div className="text-[11px] text-amber-700">
-                    Sum of Taxable, Govt, Zero-Rated, and Exempt Sales (Consistent with Form 1701Q)
+                    Sum of Taxable, Govt, Zero-Rated, and Exempt Sales
                   </div>
                 </div>
                 <div className="text-base font-mono font-bold text-amber-950 text-right">
@@ -289,7 +289,6 @@ export const Form2551QView: React.FC<Form2551QViewProps> = ({
                   <label className="text-sm text-slate-700 font-medium">
                     Vatable Sales / Subject to PT ({data.taxRatePercent}%)
                   </label>
-                  <div className="text-[11px] text-slate-400">Column H in BIR SLSP Schedule</div>
                 </div>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
@@ -308,7 +307,6 @@ export const Form2551QView: React.FC<Form2551QViewProps> = ({
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
                   <label className="text-sm text-slate-700 font-medium">Sales to Government</label>
-                  <div className="text-[11px] text-slate-400">Subject to PT withholding</div>
                 </div>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
@@ -327,7 +325,6 @@ export const Form2551QView: React.FC<Form2551QViewProps> = ({
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
                   <label className="text-sm text-slate-700 font-medium">Zero-Rated Sales (0%)</label>
-                  <div className="text-[11px] text-slate-400">Column G in BIR SLSP Schedule</div>
                 </div>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
@@ -346,7 +343,6 @@ export const Form2551QView: React.FC<Form2551QViewProps> = ({
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
                   <label className="text-sm text-slate-700 font-medium">VAT-Exempt Sales / Receipts</label>
-                  <div className="text-[11px] text-slate-400">Column F in BIR SLSP Schedule</div>
                 </div>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>

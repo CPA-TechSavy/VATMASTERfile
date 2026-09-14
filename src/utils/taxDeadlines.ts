@@ -70,11 +70,153 @@ export function getAdjustedDeadline(year: number, month: number, day: number): {
   };
 }
 
+export const MONTH_NAMES_FULL = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
+
+export const MONTH_END_DAYS = [
+  31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+];
+
+/**
+ * Calculates the exact date 60 days following the end of a given month.
+ */
+export function calculate60DaysAfterMonthEnd(refYear: number, monthEnd: number): {
+  dueYear: number;
+  dueMonth: number;
+  dueDay: number;
+} {
+  const lastDay = new Date(refYear, monthEnd, 0).getDate();
+  const d = new Date(refYear, monthEnd - 1, lastDay);
+  d.setDate(d.getDate() + 60);
+  return {
+    dueYear: d.getFullYear(),
+    dueMonth: d.getMonth() + 1,
+    dueDay: d.getDate(),
+  };
+}
+
+export interface ClientTaxableYearInfo {
+  isFiscal: boolean;
+  taxableYearType: 'calendar' | 'fiscal';
+  endMonth: number; // 1-12
+  endMonthName: string; // e.g. "June"
+  endDay: number; // e.g. 30
+  startMonthName: string; // e.g. "July"
+  periodLabel: string; // e.g. "Fiscal Year (Ending June 30)" or "Calendar Year (Ending December 31)"
+  annualAitrDeadline: string; // e.g. "October 15"
+  eAfsDeadline: string; // e.g. "October 31"
+  q1IncomeTaxDeadline: string; // e.g. "November 29"
+  q2IncomeTaxDeadline: string; // e.g. "March 1"
+  q3IncomeTaxDeadline: string; // e.g. "May 30"
+  vatDeadlines: {
+    q1: string;
+    q2: string;
+    q3: string;
+    q4: string;
+  };
+  ewtDeadlines: {
+    q1: string;
+    q2: string;
+    q3: string;
+    q4: string;
+  };
+}
+
+/**
+ * Generates human-readable statutory deadline information for a given client profile.
+ */
+export function getClientTaxableYearInfo(client?: ClientProfile | null): ClientTaxableYearInfo {
+  const isFiscal = client?.taxableYearType === 'fiscal' && Boolean(client?.fiscalYearEndMonth && client.fiscalYearEndMonth !== 12);
+  const endMonth = isFiscal ? client!.fiscalYearEndMonth! : 12;
+  const endMonthName = MONTH_NAMES_FULL[endMonth - 1];
+  const endDay = MONTH_END_DAYS[endMonth - 1];
+  const startMonthName = MONTH_NAMES_FULL[endMonth % 12];
+
+  const periodLabel = isFiscal
+    ? `Fiscal Year (Ending ${endMonthName} ${endDay})`
+    : 'Calendar Year (Ending December 31)';
+
+  // 1702 Annual: 15th of 4th month after fiscal year end
+  const aitrDueMonth = ((endMonth - 1 + 4) % 12) + 1;
+  const annualAitrDeadline = `${MONTH_NAMES_FULL[aitrDueMonth - 1]} 15`;
+
+  // eAFS: Last day of 4th month after fiscal year end
+  const eAfsLastDay = MONTH_END_DAYS[aitrDueMonth - 1];
+  const eAfsDeadline = `${MONTH_NAMES_FULL[aitrDueMonth - 1]} ${eAfsLastDay}`;
+
+  // 1702Q: 60 days after end of each of first 3 quarters
+  const q1EndMonth = ((endMonth - 1 + 3) % 12) + 1;
+  const q2EndMonth = ((endMonth - 1 + 6) % 12) + 1;
+  const q3EndMonth = ((endMonth - 1 + 9) % 12) + 1;
+
+  const q1Date = calculate60DaysAfterMonthEnd(2026, q1EndMonth);
+  const q2Date = calculate60DaysAfterMonthEnd(2026, q2EndMonth);
+  const q3Date = calculate60DaysAfterMonthEnd(2026, q3EndMonth);
+
+  const q1IncomeTaxDeadline = `${MONTH_NAMES_FULL[q1Date.dueMonth - 1]} ${q1Date.dueDay}`;
+  const q2IncomeTaxDeadline = `${MONTH_NAMES_FULL[q2Date.dueMonth - 1]} ${q2Date.dueDay}`;
+  const q3IncomeTaxDeadline = `${MONTH_NAMES_FULL[q3Date.dueMonth - 1]} ${q3Date.dueDay}`;
+
+  // VAT & EWT deadlines
+  const vatQ1Month = (q1EndMonth % 12) + 1;
+  const vatQ2Month = (q2EndMonth % 12) + 1;
+  const vatQ3Month = (q3EndMonth % 12) + 1;
+  const vatQ4Month = (endMonth % 12) + 1;
+
+  const vatDeadlines = {
+    q1: `${MONTH_NAMES_FULL[vatQ1Month - 1]} 25`,
+    q2: `${MONTH_NAMES_FULL[vatQ2Month - 1]} 25`,
+    q3: `${MONTH_NAMES_FULL[vatQ3Month - 1]} 25`,
+    q4: `${MONTH_NAMES_FULL[vatQ4Month - 1]} 25`,
+  };
+
+  const ewtDeadlines = {
+    q1: `${MONTH_NAMES_FULL[vatQ1Month - 1]} ${MONTH_END_DAYS[vatQ1Month - 1]}`,
+    q2: `${MONTH_NAMES_FULL[vatQ2Month - 1]} ${MONTH_END_DAYS[vatQ2Month - 1]}`,
+    q3: `${MONTH_NAMES_FULL[vatQ3Month - 1]} ${MONTH_END_DAYS[vatQ3Month - 1]}`,
+    q4: `${MONTH_NAMES_FULL[vatQ4Month - 1]} ${MONTH_END_DAYS[vatQ4Month - 1]}`,
+  };
+
+  return {
+    isFiscal,
+    taxableYearType: isFiscal ? 'fiscal' : 'calendar',
+    endMonth,
+    endMonthName,
+    endDay,
+    startMonthName,
+    periodLabel,
+    annualAitrDeadline,
+    eAfsDeadline,
+    q1IncomeTaxDeadline,
+    q2IncomeTaxDeadline,
+    q3IncomeTaxDeadline,
+    vatDeadlines,
+    ewtDeadlines,
+  };
+}
+
 /**
  * Returns all BIR statutory deadlines for the specified month and year.
+ * Optionally adjusted for a specific client profile (e.g. fiscal vs calendar year).
  * month: 1 (Jan) to 12 (Dec)
  */
-export function getBirDeadlinesForMonth(year: number, month: number): TaxDeadlineItem[] {
+export function getBirDeadlinesForMonth(
+  year: number,
+  month: number,
+  client?: ClientProfile | null
+): TaxDeadlineItem[] {
   const deadlines: TaxDeadlineItem[] = [];
 
   const addDeadline = (
@@ -111,6 +253,10 @@ export function getBirDeadlinesForMonth(year: number, month: number): TaxDeadlin
     });
   };
 
+  // Fiscal or Calendar year configuration
+  const isFiscal = client?.taxableYearType === 'fiscal' && Boolean(client?.fiscalYearEndMonth && client.fiscalYearEndMonth !== 12);
+  const fiscalEndMonth = isFiscal ? client!.fiscalYearEndMonth! : 12;
+
   // Helper for month names
   const prevMonthName = new Date(year, month - 2, 1).toLocaleString('default', { month: 'long' });
   const prevMonthYear = month === 1 ? year - 1 : year;
@@ -118,9 +264,11 @@ export function getBirDeadlinesForMonth(year: number, month: number): TaxDeadlin
   // -------------------------------------------------------------
   // 1. DAY 10 DEADLINES:
   // -------------------------------------------------------------
-  // 1601-C: For Months 2 to 12, due on the 10th (for previous month).
-  // Note: Month 1 (January) 1601-C is due on January 15!
-  if (month >= 2 && month <= 12) {
+  // Month following the close of the taxable year (for year-end 1601-C adjustment on Day 15)
+  const fiscalYearEndAdjMonth = (fiscalEndMonth % 12) + 1;
+
+  // 1601-C: For all months except the month following the close of the taxable year
+  if (month !== fiscalYearEndAdjMonth) {
     addDeadline(
       10,
       'BIR Form 1601-C',
@@ -137,10 +285,32 @@ export function getBirDeadlinesForMonth(year: number, month: number): TaxDeadlin
   }
 
   // 0619-E: Monthly Remittance Form for Expanded Withholding Tax (Creditable)
-  // Required for the 1st and 2nd months of each calendar quarter:
-  // Months: Feb (for Jan), Mar (for Feb), May (for Apr), Jun (for May), Aug (for Jul), Sep (for Aug), Nov (for Oct), Dec (for Nov)
-  const is0619EMonth = [2, 3, 5, 6, 8, 9, 11, 12].includes(month);
-  if (is0619EMonth) {
+  // Required for the 1st and 2nd months of each quarter
+  const q1Start = (fiscalEndMonth % 12) + 1;
+  const q1End = ((fiscalEndMonth - 1 + 3) % 12) + 1;
+  const q2End = ((fiscalEndMonth - 1 + 6) % 12) + 1;
+  const q3End = ((fiscalEndMonth - 1 + 9) % 12) + 1;
+
+  const q1RemitM1 = (q1Start % 12) + 1;
+  const q1RemitM2 = ((q1Start + 1 - 1) % 12) + 1;
+  const q2Start = (q1End % 12) + 1;
+  const q2RemitM1 = (q2Start % 12) + 1;
+  const q2RemitM2 = ((q2Start + 1 - 1) % 12) + 1;
+  const q3Start = (q2End % 12) + 1;
+  const q3RemitM1 = (q3Start % 12) + 1;
+  const q3RemitM2 = ((q3Start + 1 - 1) % 12) + 1;
+  const q4Start = (q3End % 12) + 1;
+  const q4RemitM1 = (q4Start % 12) + 1;
+  const q4RemitM2 = ((q4Start + 1 - 1) % 12) + 1;
+
+  const valid0619EMonths = new Set([
+    q1RemitM1, q1RemitM2,
+    q2RemitM1, q2RemitM2,
+    q3RemitM1, q3RemitM2,
+    q4RemitM1, q4RemitM2,
+  ]);
+
+  if (valid0619EMonths.has(month)) {
     addDeadline(
       10,
       'BIR Form 0619-E',
@@ -172,14 +342,15 @@ export function getBirDeadlinesForMonth(year: number, month: number): TaxDeadlin
   // -------------------------------------------------------------
   // 2. DAY 15 DEADLINES:
   // -------------------------------------------------------------
-  // January 15: 1601-C for December
-  if (month === 1) {
+  // 1601-C for the final month of the taxable year (with year-end annualized adjustments)
+  if (month === fiscalYearEndAdjMonth) {
+    const endMonthName = MONTH_NAMES_FULL[fiscalEndMonth - 1];
     addDeadline(
       15,
       'BIR Form 1601-C',
-      'Monthly Remittance of Taxes Withheld on Compensation (December Payroll)',
+      `Monthly Remittance of Taxes Withheld on Compensation (${endMonthName} Payroll & Year-End Adjustment)`,
       'withholding_tax',
-      `December ${year - 1} Compensation & Annual Year-End Adjustment`,
+      `${endMonthName} Compensation & Annual Year-End Adjustment`,
       { withholdingAgent: true },
       ['Year-end Annualized Withholding Tax Adjustment Schedule'],
       'eBIRForms / eFPS',
@@ -189,14 +360,42 @@ export function getBirDeadlinesForMonth(year: number, month: number): TaxDeadlin
     );
   }
 
-  // April 15: Annual Income Tax Return (AITR)
-  if (month === 4) {
+  // Annual Income Tax Return (AITR): 15th day of the 4th month following close of taxable year
+  const aitrDueMonth = ((fiscalEndMonth - 1 + 4) % 12) + 1;
+
+  if (month === aitrDueMonth) {
+    const endMonthName = MONTH_NAMES_FULL[fiscalEndMonth - 1];
+    const endDay = MONTH_END_DAYS[fiscalEndMonth - 1];
+    const periodDesc = isFiscal
+      ? `Taxable Year ending ${endMonthName} ${endDay} (Fiscal Year)`
+      : `Taxable Year ${year - 1} (Calendar Year ending Dec 31)`;
+
+    // 1702 Annual (Corporations)
+    addDeadline(
+      15,
+      'BIR Form 1702-RT / EX / MX',
+      `Annual Income Tax Return for Corporations and Partnerships (${isFiscal ? `FY Ending ${endMonthName}` : `CY ${year - 1}`})`,
+      'annual_compliance',
+      periodDesc,
+      { corporate: true },
+      [
+        'Audited Financial Statements (AFS)',
+        'Statement Management Responsibility (SMR)',
+        'SAWT for CWT 2307 credits',
+      ],
+      'eBIRForms / eFPS / eAFS portal',
+      'NIRC Sec. 52 & 77; EOPT Act (RA 11976)',
+      'Annual Corporate Income Tax Return for corporations, partnerships, and other juridical entities.',
+      '1702Annual'
+    );
+
+    // 1701 Annual (Individuals)
     addDeadline(
       15,
       'BIR Form 1701 / 1701A',
-      'Annual Income Tax Return for Individuals (Self-Employed & Professionals)',
+      `Annual Income Tax Return for Individuals (${isFiscal ? `FY Ending ${endMonthName}` : `CY ${year - 1}`})`,
       'annual_compliance',
-      `Taxable Year ${year - 1} (Full Calendar Year)`,
+      periodDesc,
       { individual: true },
       [
         'Audited Financial Statements (if gross sales > ₱3M)',
@@ -205,102 +404,87 @@ export function getBirDeadlinesForMonth(year: number, month: number): TaxDeadlin
       ],
       'eBIRForms / eFPS / eAFS for attachments',
       'NIRC Sec. 51; EOPT Act (RA 11976)',
-      'Annual final reconciliation of individual business/professional income tax for the prior calendar year.',
+      'Annual final reconciliation of individual business/professional income tax for the prior taxable year.',
       '1701Annual'
     );
-
-    addDeadline(
-      15,
-      'BIR Form 1702-RT / EX / MX',
-      'Annual Income Tax Return for Corporations and Partnerships',
-      'annual_compliance',
-      `Taxable Year ${year - 1} (Calendar Year ending Dec 31)`,
-      { corporate: true },
-      [
-        'Audited Financial Statements (AFS)',
-        'Statement Management Responsibility (SMR)',
-        'SAWT for CWT 2307 credits',
-      ],
-      'eBIRForms / eFPS / eAFS portal',
-      'NIRC Sec. 52 & 75; EOPT Act (RA 11976)',
-      'Annual Corporate Income Tax Return for corporations, partnerships, and other juridical entities.',
-      '1702Annual'
-    );
   }
 
-  // May 15: 1st Quarter Individual Income Tax (1701Q)
-  if (month === 5) {
-    addDeadline(
-      15,
-      'BIR Form 1701Q (Q1)',
-      'Quarterly Income Tax Return for Individuals - 1st Quarter',
-      'income_tax',
-      `1st Quarter ${year} (January 1 to March 31)`,
-      { individual: true },
-      ['BIR Form 2307 (Certificates of Creditable Tax Withheld)', 'SAWT via eSubmission'],
-      'eBIRForms Offline Package v7.9+ / eFPS',
-      'NIRC Sec. 74 as amended by EOPT Act (RA 11976)',
-      'First quarter income tax declaration for sole proprietors, professionals, and mixed income earners under graduated or 8% flat tax.',
-      '1701Q'
-    );
-  }
+  // Quarterly Individual Income Tax (1701Q): For calendar year taxpayers: Months 5 (Q1), 8 (Q2), 11 (Q3)
+  if (!isFiscal) {
+    if (month === 5) {
+      addDeadline(
+        15,
+        'BIR Form 1701Q (Q1)',
+        'Quarterly Income Tax Return for Individuals - 1st Quarter',
+        'income_tax',
+        `1st Quarter ${year} (January 1 to March 31)`,
+        { individual: true },
+        ['BIR Form 2307 (Certificates of Creditable Tax Withheld)', 'SAWT via eSubmission'],
+        'eBIRForms Offline Package v7.9+ / eFPS',
+        'NIRC Sec. 74 as amended by EOPT Act (RA 11976)',
+        'First quarter income tax declaration for sole proprietors, professionals, and mixed income earners under graduated or 8% flat tax.',
+        '1701Q'
+      );
+    }
 
-  // August 15: 2nd Quarter Individual Income Tax (1701Q)
-  if (month === 8) {
-    addDeadline(
-      15,
-      'BIR Form 1701Q (Q2)',
-      'Quarterly Income Tax Return for Individuals - 2nd Quarter',
-      'income_tax',
-      `2nd Quarter ${year} (Cumulative Jan 1 to June 30)`,
-      { individual: true },
-      ['BIR Form 2307 for Q2', 'SAWT for Q2'],
-      'eBIRForms Offline Package / eFPS',
-      'NIRC Sec. 74; EOPT Act (RA 11976)',
-      'Cumulative first-half income tax computation and declaration for individual taxpayers.',
-      '1701Q'
-    );
-  }
+    if (month === 8) {
+      addDeadline(
+        15,
+        'BIR Form 1701Q (Q2)',
+        'Quarterly Income Tax Return for Individuals - 2nd Quarter',
+        'income_tax',
+        `2nd Quarter ${year} (Cumulative Jan 1 to June 30)`,
+        { individual: true },
+        ['BIR Form 2307 for Q2', 'SAWT for Q2'],
+        'eBIRForms Offline Package / eFPS',
+        'NIRC Sec. 74; EOPT Act (RA 11976)',
+        'Cumulative first-half income tax computation and declaration for individual taxpayers.',
+        '1701Q'
+      );
+    }
 
-  // November 15: 3rd Quarter Individual Income Tax (1701Q)
-  if (month === 11) {
-    addDeadline(
-      15,
-      'BIR Form 1701Q (Q3)',
-      'Quarterly Income Tax Return for Individuals - 3rd Quarter',
-      'income_tax',
-      `3rd Quarter ${year} (Cumulative Jan 1 to Sept 30)`,
-      { individual: true },
-      ['BIR Form 2307 for Q3', 'SAWT for Q3'],
-      'eBIRForms Offline Package / eFPS',
-      'NIRC Sec. 74; EOPT Act (RA 11976)',
-      'Cumulative nine-month income tax calculation for individual taxpayers prior to annual consolidation.',
-      '1701Q'
-    );
+    if (month === 11) {
+      addDeadline(
+        15,
+        'BIR Form 1701Q (Q3)',
+        'Quarterly Income Tax Return for Individuals - 3rd Quarter',
+        'income_tax',
+        `3rd Quarter ${year} (Cumulative Jan 1 to Sept 30)`,
+        { individual: true },
+        ['BIR Form 2307 for Q3', 'SAWT for Q3'],
+        'eBIRForms Offline Package / eFPS',
+        'NIRC Sec. 74; EOPT Act (RA 11976)',
+        'Cumulative nine-month income tax calculation for individual taxpayers prior to annual consolidation.',
+        '1701Q'
+      );
+    }
   }
 
   // -------------------------------------------------------------
   // 3. DAY 25 DEADLINES: QUARTERLY VAT (2550Q) & PERCENTAGE TAX (2551Q)
   // -------------------------------------------------------------
-  // Month 1: Q4 of previous year (due Jan 25)
-  // Month 4: Q1 (due Apr 25)
-  // Month 7: Q2 (due Jul 25)
-  // Month 10: Q3 (due Oct 25)
-  if ([1, 4, 7, 10].includes(month)) {
+  // Due on the 25th day of the month following the close of each taxable quarter:
+  const vatDueMonthQ1 = (q1End % 12) + 1;
+  const vatDueMonthQ2 = (q2End % 12) + 1;
+  const vatDueMonthQ3 = (q3End % 12) + 1;
+  const vatDueMonthQ4 = (fiscalEndMonth % 12) + 1;
+
+  if ([vatDueMonthQ1, vatDueMonthQ2, vatDueMonthQ3, vatDueMonthQ4].includes(month)) {
     let qLabel = '';
     let qPeriod = '';
-    if (month === 1) {
-      qLabel = `4th Quarter (Q4) ${year - 1}`;
-      qPeriod = `October 1 to December 31, ${year - 1}`;
-    } else if (month === 4) {
-      qLabel = `1st Quarter (Q1) ${year}`;
-      qPeriod = `January 1 to March 31, ${year}`;
-    } else if (month === 7) {
-      qLabel = `2nd Quarter (Q2) ${year}`;
-      qPeriod = `April 1 to June 30, ${year}`;
+
+    if (month === vatDueMonthQ1) {
+      qLabel = `1st Quarter (Q1) ${isFiscal ? '(Fiscal)' : year}`;
+      qPeriod = `1st Fiscal/Calendar Quarter ending ${MONTH_NAMES_FULL[q1End - 1]}`;
+    } else if (month === vatDueMonthQ2) {
+      qLabel = `2nd Quarter (Q2) ${isFiscal ? '(Fiscal)' : year}`;
+      qPeriod = `2nd Fiscal/Calendar Quarter ending ${MONTH_NAMES_FULL[q2End - 1]}`;
+    } else if (month === vatDueMonthQ3) {
+      qLabel = `3rd Quarter (Q3) ${isFiscal ? '(Fiscal)' : year}`;
+      qPeriod = `3rd Fiscal/Calendar Quarter ending ${MONTH_NAMES_FULL[q3End - 1]}`;
     } else {
-      qLabel = `3rd Quarter (Q3) ${year}`;
-      qPeriod = `July 1 to September 30, ${year}`;
+      qLabel = `4th Quarter (Q4) ${isFiscal ? '(Fiscal)' : year - 1}`;
+      qPeriod = `4th Fiscal/Calendar Quarter ending ${MONTH_NAMES_FULL[fiscalEndMonth - 1]}`;
     }
 
     // 2550Q (VAT)
@@ -339,80 +523,82 @@ export function getBirDeadlinesForMonth(year: number, month: number): TaxDeadlin
   }
 
   // -------------------------------------------------------------
-  // 4. DAY 29/30: CORPORATE QUARTERLY INCOME TAX (1702Q)
+  // 4. CORPORATE QUARTERLY INCOME TAX (1702Q)
   // Under Sec. 75, due within 60 days following the close of each of the first three quarters.
-  // Q1 (ended Mar 31) -> May 30
-  // Q2 (ended Jun 30) -> August 29
-  // Q3 (ended Sep 30) -> November 29
   // -------------------------------------------------------------
-  if (month === 5) {
+  const q1DueDate = calculate60DaysAfterMonthEnd(year, q1End);
+  const q2DueDate = calculate60DaysAfterMonthEnd(year, q2End);
+  const q3DueDate = calculate60DaysAfterMonthEnd(year, q3End);
+
+  if (month === q1DueDate.dueMonth) {
     addDeadline(
-      30,
+      q1DueDate.dueDay,
       'BIR Form 1702Q (Q1)',
-      'Quarterly Income Tax Return for Corporations - 1st Quarter',
+      `Quarterly Income Tax Return for Corporations - 1st Quarter ${isFiscal ? '(Fiscal)' : ''}`,
       'income_tax',
-      `1st Quarter ${year} (January 1 to March 31)`,
+      `1st Quarter (ended ${MONTH_NAMES_FULL[q1End - 1]})`,
       { corporate: true },
       ['BIR Form 2307 CWT certificates', 'SAWT electronic submission'],
       'eBIRForms / eFPS',
       'NIRC Sec. 75; CREATE Act (20% MSME or 25% Regular)',
-      'First quarter corporate income tax return with 2% MCIT computation comparison.',
+      'First quarter corporate income tax return with 2% MCIT computation comparison within 60 days of quarter end.',
       '1702Q'
     );
   }
 
-  if (month === 8) {
+  if (month === q2DueDate.dueMonth) {
     addDeadline(
-      29,
+      q2DueDate.dueDay,
       'BIR Form 1702Q (Q2)',
-      'Quarterly Income Tax Return for Corporations - 2nd Quarter',
+      `Quarterly Income Tax Return for Corporations - 2nd Quarter ${isFiscal ? '(Fiscal)' : ''}`,
       'income_tax',
-      `2nd Quarter ${year} (Cumulative Jan 1 to June 30)`,
+      `2nd Quarter (Cumulative ending ${MONTH_NAMES_FULL[q2End - 1]})`,
       { corporate: true },
       ['BIR Form 2307 CWT certificates', 'SAWT electronic submission'],
       'eBIRForms / eFPS',
       'NIRC Sec. 75; CREATE Act',
-      'Cumulative first-half corporate income tax return comparing RCIT against MCIT.',
+      'Cumulative first-half corporate income tax return comparing RCIT against MCIT within 60 days of quarter end.',
       '1702Q'
     );
   }
 
-  if (month === 11) {
+  if (month === q3DueDate.dueMonth) {
     addDeadline(
-      29,
+      q3DueDate.dueDay,
       'BIR Form 1702Q (Q3)',
-      'Quarterly Income Tax Return for Corporations - 3rd Quarter',
+      `Quarterly Income Tax Return for Corporations - 3rd Quarter ${isFiscal ? '(Fiscal)' : ''}`,
       'income_tax',
-      `3rd Quarter ${year} (Cumulative Jan 1 to September 30)`,
+      `3rd Quarter (Cumulative ending ${MONTH_NAMES_FULL[q3End - 1]})`,
       { corporate: true },
       ['BIR Form 2307 CWT certificates', 'SAWT electronic submission'],
       'eBIRForms / eFPS',
       'NIRC Sec. 75; CREATE Act',
-      'Cumulative nine-month corporate income tax declaration before annual filing.',
+      'Cumulative nine-month corporate income tax declaration before annual filing within 60 days of quarter end.',
       '1702Q'
     );
   }
 
   // -------------------------------------------------------------
   // 5. LAST DAY OF MONTH: QUARTERLY EXPANDED WITHHOLDING (1601-EQ & 1601-FQ)
-  // Months: January (Q4), April (Q1), July (Q2), October (Q3)
+  // Months: Month following the close of each quarter (same months as VAT)
   // -------------------------------------------------------------
-  if ([1, 4, 7, 10].includes(month)) {
+  if ([vatDueMonthQ1, vatDueMonthQ2, vatDueMonthQ3, vatDueMonthQ4].includes(month)) {
     const lastDay = new Date(year, month, 0).getDate(); // 30 or 31
     let qLabel = '';
     let qPeriod = '';
-    if (month === 1) {
-      qLabel = `4th Quarter ${year - 1}`;
-      qPeriod = `October to December ${year - 1}`;
-    } else if (month === 4) {
-      qLabel = `1st Quarter ${year}`;
-      qPeriod = `January to March ${year}`;
-    } else if (month === 7) {
-      qLabel = `2nd Quarter ${year}`;
-      qPeriod = `April to June ${year}`;
+
+    if (month === vatDueMonthQ1) {
+      qLabel = `1st Quarter ${isFiscal ? '(Fiscal)' : year}`;
+      qPeriod = `Quarter ending ${MONTH_NAMES_FULL[q1End - 1]}`;
+    } else if (month === vatDueMonthQ2) {
+      qLabel = `2nd Quarter ${isFiscal ? '(Fiscal)' : year}`;
+      qPeriod = `Quarter ending ${MONTH_NAMES_FULL[q2End - 1]}`;
+    } else if (month === vatDueMonthQ3) {
+      qLabel = `3rd Quarter ${isFiscal ? '(Fiscal)' : year}`;
+      qPeriod = `Quarter ending ${MONTH_NAMES_FULL[q3End - 1]}`;
     } else {
-      qLabel = `3rd Quarter ${year}`;
-      qPeriod = `July to September ${year}`;
+      qLabel = `4th Quarter ${isFiscal ? '(Fiscal)' : year - 1}`;
+      qPeriod = `Quarter ending ${MONTH_NAMES_FULL[fiscalEndMonth - 1]}`;
     }
 
     addDeadline(
@@ -505,14 +691,16 @@ export function getBirDeadlinesForMonth(year: number, month: number): TaxDeadlin
     );
   }
 
-  // April 30: eAFS submission for Audited Financial Statements
-  if (month === 4) {
+  // eAFS submission for Audited Financial Statements: Last day of 4th month following fiscal year end
+  if (month === aitrDueMonth) {
+    const aitrLastDay = new Date(year, month, 0).getDate();
+    const endMonthName = MONTH_NAMES_FULL[fiscalEndMonth - 1];
     addDeadline(
-      30,
+      aitrLastDay,
       'eAFS Submission',
-      'Online Submission of Audited Financial Statements (AFS) & Attachments via eAFS',
+      `Online Submission of Audited Financial Statements (AFS) & Attachments via eAFS (${isFiscal ? `FY Ending ${endMonthName}` : `CY ${year - 1}`})`,
       'annual_compliance',
-      `Calendar Year ${year - 1}`,
+      isFiscal ? `Fiscal Year ending ${endMonthName}` : `Calendar Year ${year - 1}`,
       { corporate: true, individual: true },
       [
         'Audited Financial Statements with BIR Stamp Receipt',

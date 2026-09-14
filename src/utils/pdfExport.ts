@@ -205,13 +205,28 @@ export async function exportMultiBranchAnd2550QPdf({
   const effectiveResult = result2550Q || calculate2550Q(effective2550QData);
 
   // Statutory deadline
-  const quarterDueDates: Record<Quarter, string> = {
-    Q1: `April 25, ${year}`,
-    Q2: `July 25, ${year}`,
-    Q3: `October 25, ${year}`,
-    Q4: `January 25, ${year + 1}`,
-  };
-  const statutoryDueDate = quarterDueDates[quarter];
+  let statutoryDueDate = '';
+  if (client.taxableYearType === 'fiscal' && client.fiscalYearEndMonth && client.fiscalYearEndMonth !== 12) {
+    const endMonth = client.fiscalYearEndMonth;
+    const q1End = ((endMonth - 1 + 3) % 12) + 1;
+    const q2End = ((endMonth - 1 + 6) % 12) + 1;
+    const q3End = ((endMonth - 1 + 9) % 12) + 1;
+    const qEnds: Record<Quarter, number> = { Q1: q1End, Q2: q2End, Q3: q3End, Q4: endMonth };
+    const qDueMonth = (qEnds[quarter] % 12) + 1;
+    const mNames = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+    statutoryDueDate = `${mNames[qDueMonth - 1]} 25, ${year}`;
+  } else {
+    const quarterDueDates: Record<Quarter, string> = {
+      Q1: `April 25, ${year}`,
+      Q2: `July 25, ${year}`,
+      Q3: `October 25, ${year}`,
+      Q4: `January 25, ${year + 1}`,
+    };
+    statutoryDueDate = quarterDueDates[quarter];
+  }
   const generatedTimestamp = new Date().toLocaleString('en-PH', {
     dateStyle: 'medium',
     timeStyle: 'short',

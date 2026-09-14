@@ -28,10 +28,8 @@ import {
   CheckCircle2,
   Clock,
   ExternalLink,
-  Lock,
   AlertCircle,
   FileCheck2,
-  ShieldCheck,
 } from 'lucide-react';
 
 interface FilingSummaryViewProps {
@@ -58,7 +56,7 @@ export interface RequiredBirFormItem {
   tabKey: '1701Q' | '1702Q' | '2550Q' | '2551Q' | '1601C' | '1601EQ' | '1701Annual' | '1702Annual';
   formCode: string;
   formName: string;
-  description: string;
+  description?: string;
   filingPeriodStatus: string;
   dueDate: string;
   netPayable: number;
@@ -66,13 +64,6 @@ export interface RequiredBirFormItem {
   taxDue: number;
   credits: number;
   isSubmitted: boolean;
-}
-
-export interface LockedBirFormItem {
-  formCode: string;
-  formName: string;
-  reason: string;
-  lockedInTab: boolean;
 }
 
 /**
@@ -188,8 +179,7 @@ export const FilingSummaryView: React.FC<FilingSummaryViewProps> = ({
       tabKey: '1701Q',
       formCode: 'BIR Form 1701Q',
       formName: 'Quarterly Income Tax Return for Individuals',
-      description: `Individual Income Tax (${data1701Q?.taxRegime === '8_percent' ? '8% Flat Rate' : 'Graduated Rates'})`,
-      filingPeriodStatus: `${quarter} ${year} (Quarterly)`,
+      filingPeriodStatus: `${quarter} ${year}`,
       dueDate: getFormStatutoryDueDate('1701Q', quarter, month, year),
       netPayable: res1701Q ? Math.max(0, res1701Q.netTaxPayable) : 0,
       taxBase: res1701Q?.netTaxableIncome || 0,
@@ -204,8 +194,7 @@ export const FilingSummaryView: React.FC<FilingSummaryViewProps> = ({
       tabKey: '1702Q',
       formCode: 'BIR Form 1702Q',
       formName: 'Quarterly Income Tax Return for Corporations and Partnerships',
-      description: `Corporate Income Tax (${res1702Q?.appliedTaxType || 'Regular Rate'})`,
-      filingPeriodStatus: `${quarter} ${year} (Quarterly)`,
+      filingPeriodStatus: `${quarter} ${year}`,
       dueDate: getFormStatutoryDueDate('1702Q', quarter, month, year),
       netPayable: res1702Q ? Math.max(0, res1702Q.netTaxPayable) : 0,
       taxBase: res1702Q?.netTaxableIncome || 0,
@@ -223,8 +212,7 @@ export const FilingSummaryView: React.FC<FilingSummaryViewProps> = ({
       tabKey: '2550Q',
       formCode: 'BIR Form 2550Q',
       formName: 'Quarterly Value-Added Tax Return',
-      description: '12% Value-Added Tax (Output VAT less Input VAT & Credits)',
-      filingPeriodStatus: `${quarter} ${year} (Quarterly)`,
+      filingPeriodStatus: `${quarter} ${year}`,
       dueDate: getFormStatutoryDueDate('2550Q', quarter, month, year),
       netPayable: res2550Q ? Math.max(0, res2550Q.netVatPayable) : 0,
       taxBase: res2550Q?.vatableSales || 0,
@@ -239,8 +227,7 @@ export const FilingSummaryView: React.FC<FilingSummaryViewProps> = ({
       tabKey: '2551Q',
       formCode: 'BIR Form 2551Q',
       formName: 'Quarterly Percentage Tax Return',
-      description: `Non-VAT Percentage Tax (${res2551Q?.taxRatePercent || 3}%)`,
-      filingPeriodStatus: `${quarter} ${year} (Quarterly)`,
+      filingPeriodStatus: `${quarter} ${year}`,
       dueDate: getFormStatutoryDueDate('2551Q', quarter, month, year),
       netPayable: res2551Q ? Math.max(0, res2551Q.netPercentageTaxPayable) : 0,
       taxBase: res2551Q?.taxableSales || 0,
@@ -258,7 +245,6 @@ export const FilingSummaryView: React.FC<FilingSummaryViewProps> = ({
       tabKey: '1601C',
       formCode: 'BIR Form 1601-C',
       formName: 'Monthly Remittance Return of Income Taxes Withheld on Compensation',
-      description: 'Payroll Withholding Tax on Compensation',
       filingPeriodStatus: `Month ${month} (${currentMonthLabel} ${year})`,
       dueDate: getFormStatutoryDueDate('1601C', quarter, month, year),
       netPayable: res1601C ? Math.max(0, res1601C.netTaxRemitted) : 0,
@@ -279,8 +265,7 @@ export const FilingSummaryView: React.FC<FilingSummaryViewProps> = ({
       formName: isMonthlyEwt
         ? 'Monthly Remittance Form of Creditable Income Taxes Withheld (Expanded)'
         : 'Quarterly Remittance Return of Creditable Income Taxes Withheld (Expanded)',
-      description: isMonthlyEwt ? 'Monthly Expanded Withholding Tax (EWT)' : 'Quarterly Expanded Withholding Tax (EWT)',
-      filingPeriodStatus: isMonthlyEwt ? `Month ${month} (${currentMonthLabel} ${year})` : `${quarter} ${year} (Quarterly)`,
+      filingPeriodStatus: isMonthlyEwt ? `Month ${month} (${currentMonthLabel} ${year})` : `${quarter} ${year}`,
       dueDate: getFormStatutoryDueDate('1601EQ', quarter, month, year),
       netPayable: res1601EQ ? Math.max(0, res1601EQ.netAmountPayable) : 0,
       taxBase: res1601EQ?.totalTaxBase || 0,
@@ -298,8 +283,7 @@ export const FilingSummaryView: React.FC<FilingSummaryViewProps> = ({
       tabKey: '1701Annual',
       formCode: 'BIR Form 1701 / 1701A',
       formName: 'Annual Income Tax Return for Individuals (Single / Self-Employed)',
-      description: 'Annual ITR with Graduated or 8% Flat Rate Option (Consolidates Q1-Q4)',
-      filingPeriodStatus: `Taxable Year ${year} (Annual)`,
+      filingPeriodStatus: `Taxable Year ${year}`,
       dueDate: `April 15, ${year + 1}`,
       netPayable: res1701Annual ? Math.max(0, res1701Annual.netTaxPayable) : 0,
       taxBase: res1701Annual?.netTaxableIncome || 0,
@@ -314,76 +298,13 @@ export const FilingSummaryView: React.FC<FilingSummaryViewProps> = ({
       tabKey: '1702Annual',
       formCode: 'BIR Form 1702-RT',
       formName: 'Annual Income Tax Return for Corporations and Partnerships',
-      description: `Annual Corporate ITR (${res1702Annual?.appliedTaxType || 'Regular Rate / MCIT'} - Consolidates Q1-Q4)`,
-      filingPeriodStatus: `Taxable Year ${year} (Annual)`,
+      filingPeriodStatus: `Taxable Year ${year}`,
       dueDate: `April 15, ${year + 1}`,
       netPayable: res1702Annual ? Math.max(0, res1702Annual.netTaxPayable) : 0,
       taxBase: res1702Annual?.netTaxableIncome || 0,
       taxDue: res1702Annual?.taxDue || 0,
       credits: res1702Annual?.totalTaxCredits || 0,
       isSubmitted: !!submittedStatusMap[idKeyAnnual],
-    });
-  }
-
-  // 2. List of BIR Forms NOT NEEDED / LOCKED for this Client
-  const lockedForms: LockedBirFormItem[] = [];
-
-  if (isSingle) {
-    lockedForms.push({
-      formCode: 'BIR Form 1702Q',
-      formName: 'Corporate Quarterly Income Tax',
-      reason: `Client is registered as "${client.classification}" (Individual). Files Form 1701Q instead.`,
-      lockedInTab: true,
-    });
-    lockedForms.push({
-      formCode: 'BIR Form 1702-RT (Annual)',
-      formName: 'Corporate Annual Income Tax Return',
-      reason: `Client is registered as "${client.classification}" (Individual). Files Form 1701 (Annual) instead.`,
-      lockedInTab: true,
-    });
-  } else {
-    lockedForms.push({
-      formCode: 'BIR Form 1701Q',
-      formName: 'Individual Quarterly Income Tax',
-      reason: `Client is registered as "${client.classification}" (Juridical Entity). Files Form 1702Q instead.`,
-      lockedInTab: true,
-    });
-    lockedForms.push({
-      formCode: 'BIR Form 1701 (Annual)',
-      formName: 'Individual Annual Income Tax Return',
-      reason: `Client is registered as "${client.classification}" (Juridical Entity). Files Form 1702-RT (Annual) instead.`,
-      lockedInTab: true,
-    });
-  }
-
-  if (isVat) {
-    lockedForms.push({
-      formCode: 'BIR Form 2551Q',
-      formName: 'Quarterly Percentage Tax (Non-VAT)',
-      reason: 'Client is registered as VAT-Registered (12%). Files Form 2550Q instead.',
-      lockedInTab: true,
-    });
-  } else {
-    lockedForms.push({
-      formCode: 'BIR Form 2550Q',
-      formName: 'Quarterly Value-Added Tax (VAT)',
-      reason: 'Client is registered as Non-VAT. Files Form 2551Q (3% Percentage Tax) instead.',
-      lockedInTab: true,
-    });
-  }
-
-  if (!isWithholding) {
-    lockedForms.push({
-      formCode: 'BIR Form 1601-C',
-      formName: 'Withholding Tax on Compensation',
-      reason: 'Client profile has withholding agent status turned off (no compensation withholding obligations).',
-      lockedInTab: true,
-    });
-    lockedForms.push({
-      formCode: 'BIR Form 0619-E / 1601-EQ',
-      formName: 'Expanded Withholding Tax (EWT)',
-      reason: 'Client profile has withholding agent status turned off (no expanded withholding obligations).',
-      lockedInTab: true,
     });
   }
 
@@ -518,7 +439,6 @@ export const FilingSummaryView: React.FC<FilingSummaryViewProps> = ({
                     {/* Tax Description */}
                     <td className="py-3.5 px-4 font-sans text-slate-700 max-w-xs">
                       <div className="font-medium text-slate-800">{item.formName}</div>
-                      <div className="text-[11px] text-slate-500 mt-0.5">{item.description}</div>
                     </td>
 
                     {/* Status on what quarter or month needed to file */}
@@ -534,7 +454,6 @@ export const FilingSummaryView: React.FC<FilingSummaryViewProps> = ({
                         <Calendar className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                         <span>{item.dueDate}</span>
                       </div>
-                      <div className="text-[10px] text-slate-500 font-mono mt-0.5">eOPT Compliance</div>
                     </td>
 
                     {/* Net Tax Due */}
@@ -598,56 +517,6 @@ export const FilingSummaryView: React.FC<FilingSummaryViewProps> = ({
                 </tr>
               </tfoot>
             </table>
-          </div>
-        </div>
-
-        {/* Excluded / Locked Forms for this Client */}
-        <div className="bg-slate-50/80 border border-slate-200 rounded-xl p-5 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-slate-800 font-semibold text-xs uppercase tracking-wider">
-              <Lock className="w-4 h-4 text-slate-500" />
-              <span>Non-Applicable & Locked BIR Forms for this Client</span>
-            </div>
-            <span className="text-[11px] font-medium text-slate-500">
-              Locked in Tab Navigation
-            </span>
-          </div>
-
-          <p className="text-xs text-slate-600">
-            Based on the client's tax classification (<strong>{client.classification}</strong>) and registration status, the following BIR forms are <strong>not needed</strong> and have been locked in the top navigation tabs to avoid filing mistakes or confusion:
-          </p>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
-            {lockedForms.map((lf, idx) => (
-              <div
-                key={idx}
-                className="p-3 bg-white rounded-lg border border-slate-200 shadow-2xs flex items-start gap-2.5"
-              >
-                <div className="p-1 rounded bg-slate-100 text-slate-500 shrink-0 mt-0.5">
-                  <Lock className="w-3.5 h-3.5 text-slate-600" />
-                </div>
-                <div className="space-y-0.5">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-slate-900">{lf.formCode}</span>
-                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 font-mono">
-                      Locked
-                    </span>
-                  </div>
-                  <div className="text-xs text-slate-600">{lf.reason}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* eOPT Compliance Notice */}
-        <div className="bg-indigo-50/70 border border-indigo-100 rounded-xl p-4 flex items-start gap-3 text-xs text-indigo-950">
-          <ShieldCheck className="w-5 h-5 text-indigo-600 shrink-0 mt-0.5" />
-          <div className="space-y-1">
-            <div className="font-bold">Ease of Paying Taxes (eOPT) Act Compliance (Republic Act No. 11976)</div>
-            <p className="text-indigo-900 leading-relaxed">
-              Tax returns can now be filed and taxes paid electronically or manually at any Authorized Agent Bank (AAB), Revenue District Office (RDO), or authorized tax software portal without the imposition of wrong-venue surcharges. Output VAT and input VAT are now accounted for on an invoice/accrual basis.
-            </p>
           </div>
         </div>
       </div>

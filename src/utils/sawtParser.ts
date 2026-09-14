@@ -108,7 +108,7 @@ export function extractGrandTotalFromSawt(rawRows: any[][]): SawtExtractionResul
         totalCwt: Math.round(valColI * 100) / 100,
         totalGross: valGrossColG !== null ? Math.round(valGrossColG * 100) / 100 : null,
         method: 'grand_total_row',
-        details: `Extracted directly from Column I (Index 8: AMOUNT OF TAX WITHHELD) intersecting 'Grand Total' row (Row ${grandTotalRowIndex + 1}).`,
+        details: 'Grand Total row extraction',
         targetColI: TARGET_COL_I,
         grandTotalRowIndex,
         endOfReportRowIndex,
@@ -124,7 +124,7 @@ export function extractGrandTotalFromSawt(rawRows: any[][]): SawtExtractionResul
           totalCwt: Math.round(numVal * 100) / 100,
           totalGross: valGrossColG !== null ? Math.round(valGrossColG * 100) / 100 : null,
           method: 'grand_total_row',
-          details: `Extracted from 'Grand Total' row (Row ${grandTotalRowIndex + 1}), Column ${colLetter}.`,
+          details: `Grand Total extraction (Column ${colLetter})`,
           targetColI: c,
           grandTotalRowIndex,
           endOfReportRowIndex,
@@ -486,9 +486,12 @@ export function parseSawtExcelFile(buffer: ArrayBuffer | Uint8Array, fileName: s
   const tinGroups = new Map<string, SawtRecord[]>();
 
   records.forEach((rec) => {
-    // Normalize TIN for grouping key
+    // Strip all punctuation/spaces to extract numeric digits
     const rawDigits = (rec.payorTin || '').replace(/[^0-9]/g, '');
-    const key = rawDigits.length >= 9 ? rec.payorTin.trim() : (rec.payorTin.trim() || rec.payorName.trim());
+    // Standard Philippine BIR TIN uses 9 base digits plus optional 3-5 branch digits (e.g. 000).
+    // Normalize by 9-digit base TIN so same customer with different branch formatting (e.g. 000 vs 0000 or unbranched) merges into one entry
+    const baseTin = rawDigits.length >= 9 ? rawDigits.slice(0, 9) : rawDigits;
+    const key = baseTin || (rec.payorTin ? rec.payorTin.trim().toLowerCase() : '') || (rec.payorName ? rec.payorName.trim().toLowerCase() : 'unknown');
     if (!tinGroups.has(key)) {
       tinGroups.set(key, []);
     }
@@ -502,13 +505,22 @@ export function parseSawtExcelFile(buffer: ArrayBuffer | Uint8Array, fileName: s
     const totalGross = groupRecords.reduce((sum, r) => sum + r.grossAmount, 0);
     const totalCwt = groupRecords.reduce((sum, r) => sum + r.cwtAmount, 0);
 
-    // Pick most descriptive registered name
+    // Pick most complete and descriptive registered name
     const bestName =
       groupRecords
         .map((r) => r.payorName)
         .filter((n) => n && !n.includes('PAYOR') && n !== 'WITHHOLDING AGENT / PAYOR')
         .sort((a, b) => b.length - a.length)[0] ||
       groupRecords[0].payorName;
+
+    // Pick cleanest formatted TIN representation
+    const bestTin =
+      groupRecords
+        .map((r) => r.payorTin)
+        .filter((t) => t && t.replace(/[^0-9]/g, '').length >= 9)
+        .sort((a, b) => b.length - a.length)[0] ||
+      groupRecords[0].payorTin ||
+      tinKey;
 
     // Collect distinct periods (e.g. Q1, Q2)
     const periods = Array.from(
@@ -531,7 +543,7 @@ export function parseSawtExcelFile(buffer: ArrayBuffer | Uint8Array, fileName: s
       id: `sawt_tin_${seqCounter}_${Date.now()}`,
       seqNo: seqCounter++,
       taxablePeriod: periods || 'Full Year',
-      payorTin: groupRecords[0].payorTin || tinKey,
+      payorTin: bestTin,
       payorName: bestName,
       atcCode: atcs || 'WC158',
       description:

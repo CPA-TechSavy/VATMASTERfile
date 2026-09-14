@@ -4,6 +4,7 @@ import { calculate1701Q } from '../utils/taxCalculations';
 import { formatPHP, parseNumber } from '../utils/formatters';
 import { Calculator, AlertTriangle, Save, CheckCircle2, Sparkles, RefreshCw } from 'lucide-react';
 import { PenaltiesModal } from './PenaltiesModal';
+import { AccountingInput } from './AccountingInput';
 
 interface Form1701QViewProps {
   client: ClientProfile;
@@ -206,11 +207,10 @@ export const Form1701QView: React.FC<Form1701QViewProps> = ({
                 <div className="flex items-center gap-2 w-full sm:w-auto">
                   <div className="relative w-full sm:w-60">
                     <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
-                    <input
+                    <AccountingInput
                       id="gross-sales-cq-1701q"
-                      type="number"
-                      value={data.grossSalesCurrentQuarter || ''}
-                      onChange={(e) => updateField('grossSalesCurrentQuarter', parseNumber(e.target.value))}
+                      value={data.grossSalesCurrentQuarter}
+                      onChange={(val) => updateField('grossSalesCurrentQuarter', val)}
                       placeholder="0.00"
                       className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-indigo-50/30"
                     />
@@ -235,13 +235,12 @@ export const Form1701QView: React.FC<Form1701QViewProps> = ({
                 </label>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInput
                     id="gross-sales-pq-1701q"
-                    type="number"
-                    value={data.grossSalesPriorQuarters || ''}
-                    onChange={(e) => updateField('grossSalesPriorQuarters', parseNumber(e.target.value))}
+                    value={data.grossSalesPriorQuarters}
+                    onChange={(val) => updateField('grossSalesPriorQuarters', val)}
                     placeholder="0.00"
-                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
                   />
                 </div>
               </div>
@@ -252,13 +251,12 @@ export const Form1701QView: React.FC<Form1701QViewProps> = ({
                 </label>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInput
                     id="non-op-1701q"
-                    type="number"
-                    value={data.nonOperatingIncome || ''}
-                    onChange={(e) => updateField('nonOperatingIncome', parseNumber(e.target.value))}
+                    value={data.nonOperatingIncome}
+                    onChange={(val) => updateField('nonOperatingIncome', val)}
                     placeholder="0.00"
-                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
                   />
                 </div>
               </div>
@@ -272,13 +270,12 @@ export const Form1701QView: React.FC<Form1701QViewProps> = ({
                   <label className="text-sm text-slate-700">Cost of Sales / Services</label>
                   <div className="relative w-full sm:w-60">
                     <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
-                    <input
+                    <AccountingInput
                       id="cost-of-sales-1701q"
-                      type="number"
-                      value={data.costOfSales || ''}
-                      onChange={(e) => updateField('costOfSales', parseNumber(e.target.value))}
+                      value={data.costOfSales}
+                      onChange={(val) => updateField('costOfSales', val)}
                       placeholder="0.00"
-                      className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                      className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
                     />
                   </div>
                 </div>
@@ -286,13 +283,12 @@ export const Form1701QView: React.FC<Form1701QViewProps> = ({
                   <label className="text-sm text-slate-700">Allowable Operating Expenses</label>
                   <div className="relative w-full sm:w-60">
                     <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
-                    <input
+                    <AccountingInput
                       id="operating-expenses-1701q"
-                      type="number"
-                      value={data.operatingExpenses || ''}
-                      onChange={(e) => updateField('operatingExpenses', parseNumber(e.target.value))}
+                      value={data.operatingExpenses}
+                      onChange={(val) => updateField('operatingExpenses', val)}
                       placeholder="0.00"
-                      className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                      className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
                     />
                   </div>
                 </div>
@@ -314,13 +310,12 @@ export const Form1701QView: React.FC<Form1701QViewProps> = ({
                 </div>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInput
                     id="cwt2307-1701q"
-                    type="number"
-                    value={data.cwt2307Credits || ''}
-                    onChange={(e) => updateField('cwt2307Credits', parseNumber(e.target.value))}
+                    value={data.cwt2307Credits}
+                    onChange={(val) => updateField('cwt2307Credits', val)}
                     placeholder="0.00"
-                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
                   />
                 </div>
               </div>
@@ -329,13 +324,12 @@ export const Form1701QView: React.FC<Form1701QViewProps> = ({
                 <label className="text-sm text-slate-700">Tax Payments for Prior Quarters</label>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInput
                     id="pq-payments-1701q"
-                    type="number"
-                    value={data.quarterlyTaxPaidPriorQuarters || ''}
-                    onChange={(e) => updateField('quarterlyTaxPaidPriorQuarters', parseNumber(e.target.value))}
+                    value={data.quarterlyTaxPaidPriorQuarters}
+                    onChange={(val) => updateField('quarterlyTaxPaidPriorQuarters', val)}
                     placeholder="0.00"
-                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
                   />
                 </div>
               </div>
@@ -344,13 +338,12 @@ export const Form1701QView: React.FC<Form1701QViewProps> = ({
                 <label className="text-sm text-slate-700">Prior Year's Excess Credits</label>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInput
                     id="py-credits-1701q"
-                    type="number"
-                    value={data.priorYearExcessCredits || ''}
-                    onChange={(e) => updateField('priorYearExcessCredits', parseNumber(e.target.value))}
+                    value={data.priorYearExcessCredits}
+                    onChange={(val) => updateField('priorYearExcessCredits', val)}
                     placeholder="0.00"
-                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
                   />
                 </div>
               </div>
@@ -359,13 +352,12 @@ export const Form1701QView: React.FC<Form1701QViewProps> = ({
                 <label className="text-sm text-slate-700">Other Tax Credits / Tax Reliefs</label>
                 <div className="relative w-full sm:w-60">
                   <span className="absolute left-3 top-2 text-sm text-slate-400 font-mono">₱</span>
-                  <input
+                  <AccountingInput
                     id="other-credits-1701q"
-                    type="number"
-                    value={data.otherTaxCredits || ''}
-                    onChange={(e) => updateField('otherTaxCredits', parseNumber(e.target.value))}
+                    value={data.otherTaxCredits}
+                    onChange={(val) => updateField('otherTaxCredits', val)}
                     placeholder="0.00"
-                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
                   />
                 </div>
               </div>

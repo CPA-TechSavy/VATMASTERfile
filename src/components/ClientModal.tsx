@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { X, Building2, User, Trash2 } from 'lucide-react';
-import { ClientProfile, TaxClassification, VatStatus } from '../types/tax';
+import { X, Building2, User, Trash2, Calendar, Info } from 'lucide-react';
+import { ClientProfile, TaxClassification, VatStatus, TaxableYearType } from '../types/tax';
 import { formatTIN } from '../utils/formatters';
 import { BIR_RDO_LIST } from '../data/rdoList';
+import { MONTH_NAMES_FULL, MONTH_END_DAYS, calculate60DaysAfterMonthEnd } from '../utils/taxDeadlines';
 
 interface ClientModalProps {
   isOpen: boolean;
@@ -27,6 +28,8 @@ export const ClientModal: React.FC<ClientModalProps> = ({
   const [vatStatus, setVatStatus] = useState<VatStatus>('vat-registered');
   const [isWithholdingAgent, setIsWithholdingAgent] = useState(false);
   const [hasBranches, setHasBranches] = useState(false);
+  const [taxableYearType, setTaxableYearType] = useState<TaxableYearType>('calendar');
+  const [fiscalYearEndMonth, setFiscalYearEndMonth] = useState<number>(6); // Default to June
   const [notes, setNotes] = useState('');
 
   useEffect(() => {
@@ -39,6 +42,8 @@ export const ClientModal: React.FC<ClientModalProps> = ({
       setVatStatus(clientToEdit.vatStatus);
       setIsWithholdingAgent(clientToEdit.isWithholdingAgent);
       setHasBranches(Boolean(clientToEdit.hasBranches));
+      setTaxableYearType(clientToEdit.taxableYearType || 'calendar');
+      setFiscalYearEndMonth(clientToEdit.fiscalYearEndMonth || 6);
       setNotes(clientToEdit.notes || '');
     } else {
       setTradeName('');
@@ -49,6 +54,8 @@ export const ClientModal: React.FC<ClientModalProps> = ({
       setVatStatus('vat-registered');
       setIsWithholdingAgent(false);
       setHasBranches(false);
+      setTaxableYearType('calendar');
+      setFiscalYearEndMonth(6);
       setNotes('');
     }
   }, [clientToEdit, isOpen]);
@@ -69,6 +76,8 @@ export const ClientModal: React.FC<ClientModalProps> = ({
       vatStatus,
       isWithholdingAgent,
       hasBranches,
+      taxableYearType,
+      fiscalYearEndMonth: taxableYearType === 'fiscal' ? fiscalYearEndMonth : 12,
       notes: notes.trim(),
     };
 
@@ -262,6 +271,150 @@ export const ClientModal: React.FC<ClientModalProps> = ({
               <span className="font-medium">Withholding Agent</span>
               <span className="text-xs text-slate-500">(Required to file 1601-C / 0619-E)</span>
             </label>
+          </div>
+
+          {/* Taxable Year Basis: Calendar Year vs Fiscal Year */}
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 text-indigo-600" />
+                Taxable Year Period
+              </label>
+              <span className="text-[11px] font-mono text-slate-500">Sec. 43 NIRC</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <button
+                type="button"
+                id="tax-year-calendar-btn"
+                onClick={() => setTaxableYearType('calendar')}
+                className={`flex items-start gap-2.5 p-3 rounded-lg border text-left transition-all ${
+                  taxableYearType === 'calendar'
+                    ? 'border-indigo-600 bg-white text-indigo-950 font-semibold ring-2 ring-indigo-500/20 shadow-xs'
+                    : 'border-slate-200 hover:border-slate-300 text-slate-700 bg-white/70'
+                }`}
+              >
+                <div
+                  className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0 mt-0.5 ${
+                    taxableYearType === 'calendar' ? 'border-indigo-600 bg-indigo-600' : 'border-slate-400'
+                  }`}
+                >
+                  {taxableYearType === 'calendar' && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-slate-900">Calendar Year (Ending Dec 31)</p>
+                  <p className="text-[11px] text-slate-500 font-normal mt-0.5">
+                    Standard taxable year (Jan 1 to Dec 31). Annual ITR due on April 15.
+                  </p>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                id="tax-year-fiscal-btn"
+                onClick={() => setTaxableYearType('fiscal')}
+                className={`flex items-start gap-2.5 p-3 rounded-lg border text-left transition-all ${
+                  taxableYearType === 'fiscal'
+                    ? 'border-indigo-600 bg-white text-indigo-950 font-semibold ring-2 ring-indigo-500/20 shadow-xs'
+                    : 'border-slate-200 hover:border-slate-300 text-slate-700 bg-white/70'
+                }`}
+              >
+                <div
+                  className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0 mt-0.5 ${
+                    taxableYearType === 'fiscal' ? 'border-indigo-600 bg-indigo-600' : 'border-slate-400'
+                  }`}
+                >
+                  {taxableYearType === 'fiscal' && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-slate-900">Fiscal Year (Ending Another Month)</p>
+                  <p className="text-[11px] text-slate-500 font-normal mt-0.5">
+                    12-month period closing on the last day of any month other than December.
+                  </p>
+                </div>
+              </button>
+            </div>
+
+            {taxableYearType === 'fiscal' && (
+              <div className="pt-2 border-t border-slate-200 space-y-3">
+                <div>
+                  <label htmlFor="fiscal-year-end-select" className="block text-xs font-semibold text-slate-700 mb-1">
+                    Select Fiscal Year Closing Month:
+                  </label>
+                  <select
+                    id="fiscal-year-end-select"
+                    value={fiscalYearEndMonth}
+                    onChange={(e) => setFiscalYearEndMonth(Number(e.target.value))}
+                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-indigo-500 bg-white font-medium"
+                  >
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((m) => {
+                      const aitrMonth = ((m - 1 + 4) % 12) + 1;
+                      return (
+                        <option key={m} value={m}>
+                          Ending {MONTH_NAMES_FULL[m - 1]} {MONTH_END_DAYS[m - 1]} &nbsp;— (Annual AITR Form 1702 Due: {MONTH_NAMES_FULL[aitrMonth - 1]} 15)
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+
+                {/* Live calculation preview of adjusted BIR deadlines */}
+                <div className="p-2.5 bg-indigo-50/70 border border-indigo-200 rounded-lg text-xs space-y-1.5">
+                  <p className="font-semibold text-indigo-900 flex items-center gap-1.5">
+                    <Info className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                    Calculated Statutory BIR Deadlines for Fiscal Year Ending {MONTH_NAMES_FULL[fiscalYearEndMonth - 1]} {MONTH_END_DAYS[fiscalYearEndMonth - 1]}:
+                  </p>
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-slate-700">
+                    <div>
+                      <span className="text-slate-500">Annual AITR (1702):</span>{' '}
+                      <strong className="text-indigo-900">
+                        {MONTH_NAMES_FULL[((fiscalYearEndMonth - 1 + 4) % 12)]} 15
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-500">eAFS Submission:</span>{' '}
+                      <strong className="text-indigo-900">
+                        {MONTH_NAMES_FULL[((fiscalYearEndMonth - 1 + 4) % 12)]} {MONTH_END_DAYS[((fiscalYearEndMonth - 1 + 4) % 12)]}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-500">1st Quarter (1702Q):</span>{' '}
+                      <strong className="text-indigo-900">
+                        {(() => {
+                          const q1End = ((fiscalYearEndMonth - 1 + 3) % 12) + 1;
+                          const due = calculate60DaysAfterMonthEnd(2026, q1End);
+                          return `${MONTH_NAMES_FULL[due.dueMonth - 1]} ${due.dueDay}`;
+                        })()}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-500">2nd Quarter (1702Q):</span>{' '}
+                      <strong className="text-indigo-900">
+                        {(() => {
+                          const q2End = ((fiscalYearEndMonth - 1 + 6) % 12) + 1;
+                          const due = calculate60DaysAfterMonthEnd(2026, q2End);
+                          return `${MONTH_NAMES_FULL[due.dueMonth - 1]} ${due.dueDay}`;
+                        })()}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-500">3rd Quarter (1702Q):</span>{' '}
+                      <strong className="text-indigo-900">
+                        {(() => {
+                          const q3End = ((fiscalYearEndMonth - 1 + 9) % 12) + 1;
+                          const due = calculate60DaysAfterMonthEnd(2026, q3End);
+                          return `${MONTH_NAMES_FULL[due.dueMonth - 1]} ${due.dueDay}`;
+                        })()}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-500">Quarterly VAT (2550Q):</span>{' '}
+                      <strong className="text-indigo-900">25th of month after each fiscal quarter</strong>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           <div>
