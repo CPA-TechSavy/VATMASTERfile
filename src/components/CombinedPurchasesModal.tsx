@@ -269,8 +269,8 @@ export const CombinedPurchasesModal: React.FC<CombinedPurchasesModalProps> = ({
         </div>
 
         {/* Summary Metrics Cards */}
-        <div className="p-4 bg-slate-50 border-b border-slate-200 grid grid-cols-2 sm:grid-cols-4 gap-3 shrink-0">
-          <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs">
+        <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-wrap gap-3 shrink-0">
+          <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs flex-1 min-w-[140px]">
             <div className="flex items-center justify-between text-[11px] text-slate-500 font-medium">
               <span>Transactions</span>
               <Layers className="w-3.5 h-3.5 text-slate-400" />
@@ -284,7 +284,7 @@ export const CombinedPurchasesModal: React.FC<CombinedPurchasesModalProps> = ({
             </div>
           </div>
 
-          <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs">
+          <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs flex-1 min-w-[140px]">
             <div className="flex items-center justify-between text-[11px] text-slate-500 font-medium">
               <span>Gross Purchases</span>
               <CreditCard className="w-3.5 h-3.5 text-slate-400" />
@@ -295,18 +295,42 @@ export const CombinedPurchasesModal: React.FC<CombinedPurchasesModalProps> = ({
             <div className="text-[10px] text-slate-400">Total invoice amounts</div>
           </div>
 
-          <div className="p-3 bg-white rounded-xl border border-amber-200 shadow-2xs bg-amber-50/20">
+          <div className="p-3 bg-white rounded-xl border border-amber-200 shadow-2xs bg-amber-50/20 flex-1 min-w-[140px]">
             <div className="flex items-center justify-between text-[11px] text-amber-900 font-medium">
-              <span>Taxable Purchases</span>
+              <span>VATable Purchases</span>
               <Building2 className="w-3.5 h-3.5 text-amber-600" />
             </div>
             <div className="mt-1 text-base sm:text-lg font-bold text-amber-900 font-mono">
               ₱{formatPHP(filteredTotals.taxable)}
             </div>
-            <div className="text-[10px] text-amber-700">Goods, services, & capital</div>
+            <div className="text-[10px] text-amber-700">Taxable purchases</div>
           </div>
 
-          <div className="p-3 bg-white rounded-xl border border-amber-300 shadow-2xs bg-amber-50/40">
+          {filteredTotals.exempt > 0 && (
+            <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs flex-1 min-w-[140px]">
+              <div className="flex items-center justify-between text-[11px] text-slate-700 font-medium">
+                <span>Exempt Purchases</span>
+              </div>
+              <div className="mt-1 text-base sm:text-lg font-bold text-slate-800 font-mono">
+                ₱{formatPHP(filteredTotals.exempt)}
+              </div>
+              <div className="text-[10px] text-slate-500">VAT-exempt purchases</div>
+            </div>
+          )}
+
+          {filteredTotals.zeroRated > 0 && (
+            <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs flex-1 min-w-[140px]">
+              <div className="flex items-center justify-between text-[11px] text-slate-700 font-medium">
+                <span>Zero-Rated Purchases</span>
+              </div>
+              <div className="mt-1 text-base sm:text-lg font-bold text-slate-800 font-mono">
+                ₱{formatPHP(filteredTotals.zeroRated)}
+              </div>
+              <div className="text-[10px] text-slate-500">Zero-rated purchases</div>
+            </div>
+          )}
+
+          <div className="p-3 bg-white rounded-xl border border-amber-300 shadow-2xs bg-amber-50/40 flex-1 min-w-[140px]">
             <div className="flex items-center justify-between text-[11px] text-amber-950 font-bold">
               <span>Input Tax (12%)</span>
               <span className="text-[10px] px-1.5 py-0.2 bg-amber-600 text-white rounded font-mono font-bold">

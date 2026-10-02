@@ -67,6 +67,7 @@ export interface MultiBranchReportingState {
   purchasesMode: PurchasesReportingMode; // 'consolidated' | 'per-branch'
   consolidatedPurchasesFile?: BirUploadedFileRecord;
   deferralState?: SalesDeferralState;
+  salesPurchasesAdjustmentState?: SalesAndPurchasesAdjustmentState;
 }
 
 export interface SalesDeferralState {
@@ -75,6 +76,39 @@ export interface SalesDeferralState {
   manualVatDue: number; // manual VAT Due / Output Tax deferred
   previousQuarterHideAmount?: number; // Previous quarter hide amount (Taxable Sales)
   previousQuarterHideOutputTax?: number; // Previous quarter hide amount (Output VAT)
+}
+
+export interface SalesAndPurchasesAdjustmentState {
+  increaseTaxableSales: number; // Additional taxable sales (₱)
+  increaseOutputTax: number; // Additional output tax (₱, 12%)
+  decreaseTaxablePurchases: number; // Manual reduction in taxable purchases (₱)
+  decreaseInputTax: number; // Manual reduction in input tax (₱, 12%)
+  reducedPurchaseKeys?: string[]; // Specific purchase transaction keys excluded/reduced
+  specificPurchasesTaxable?: number; // Total taxable amount from selected specific purchase transactions
+  specificPurchasesInputTax?: number; // Total input tax amount from selected specific purchase transactions
+  notes?: string;
+}
+
+export interface SalesPurchasesAdjustmentSummary {
+  hasActiveAdjustment: boolean;
+  increaseTaxableSales: number;
+  increaseOutputTax: number;
+  manualDecreasePurchasesTaxable: number;
+  manualDecreasePurchasesInputTax: number;
+  specificDecreasePurchasesTaxable: number;
+  specificDecreasePurchasesInputTax: number;
+  totalDecreasePurchasesTaxable: number;
+  totalDecreasePurchasesInputTax: number;
+  specificPurchasesCount: number;
+  netVatAdjustmentImpact: number; // additional net tax payable from adjustments
+}
+
+export interface CombinedPurchasesItem extends BirTransactionRow {
+  monthIndex: MonthIndex | 0;
+  monthLabel: string;
+  monthName: string;
+  branchName: string;
+  branchId: string;
 }
 
 export interface SalesDeferralSummary {

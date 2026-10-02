@@ -7,6 +7,8 @@ import {
   MonthIndex,
   BirTransactionRow,
   SalesDeferralState,
+  SalesAndPurchasesAdjustmentState,
+  CombinedPurchasesItem,
 } from '../types/branchVat';
 import {
   downloadBirSlspExcelTemplate,
@@ -16,6 +18,7 @@ import { formatPHP } from '../utils/formatters';
 import { exportMultiBranchAnd2550QPdf, exportVatComparisonPdf } from '../utils/pdfExport';
 import { getPriorQuarterExcessInputVat } from '../utils/taxCalculations';
 import { DeferredSalesModal } from './DeferredSalesModal';
+import { SalesAndPurchasesAdjustmentModal } from './SalesAndPurchasesAdjustmentModal';
 import { CombinedPurchasesModal, CombinedPurchasesRow } from './CombinedPurchasesModal';
 import {
   Building,
@@ -47,8 +50,12 @@ import {
   Square,
   Filter,
   Sparkles,
+  TrendingUp,
+  TrendingDown,
   Tag,
   CheckCheck,
+  Lock,
+  Unlock,
 } from 'lucide-react';
 
 interface BranchVatScheduleProps {
@@ -261,6 +268,48 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
   });
 
   const [showDeferralModal, setShowDeferralModal] = useState(false);
+
+  // Sales Increase Adjustment State (Increase Sales [+])
+  const [salesPurchasesAdjustmentState, setSalesPurchasesAdjustmentState] = useState<SalesAndPurchasesAdjustmentState>(() => {
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.salesPurchasesAdjustmentState) return parsed.salesPurchasesAdjustmentState;
+      }
+    } catch (e) {
+      console.error('Failed to load salesPurchasesAdjustmentState', e);
+    }
+    return {
+      increaseTaxableSales: 0,
+      increaseOutputTax: 0,
+      decreaseTaxablePurchases: 0,
+      decreaseInputTax: 0,
+      reducedPurchaseKeys: [],
+      specificPurchasesTaxable: 0,
+      specificPurchasesInputTax: 0,
+      notes: '',
+    };
+  });
+
+  const [showSalesPurchasesAdjustmentModal, setShowSalesPurchasesAdjustmentModal] = useState(false);
+
+  // Manual Prior Quarter Excess Input Tax (editable if no previous quarter data exists)
+  const [manualPriorQuarterExcess, setManualPriorQuarterExcess] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (typeof parsed.manualPriorQuarterExcess === 'number') {
+          return parsed.manualPriorQuarterExcess;
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load manualPriorQuarterExcess', e);
+    }
+    return 0;
+  });
+
   const [summaryViewMode, setSummaryViewMode] = useState<'actual' | 'adjusted'>('actual');
 
   // UI state
@@ -380,6 +429,23 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
             manualVatDue: 0,
           }
         );
+        setSalesPurchasesAdjustmentState(
+          parsed.salesPurchasesAdjustmentState || {
+            increaseTaxableSales: 0,
+            increaseOutputTax: 0,
+            decreaseTaxablePurchases: 0,
+            decreaseInputTax: 0,
+            reducedPurchaseKeys: [],
+            specificPurchasesTaxable: 0,
+            specificPurchasesInputTax: 0,
+            notes: '',
+          }
+        );
+        setManualPriorQuarterExcess(
+          typeof parsed.manualPriorQuarterExcess === 'number'
+            ? parsed.manualPriorQuarterExcess
+            : 0
+        );
       } else {
         // Clean slate for the new quarter
         setBranches([
@@ -400,6 +466,17 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
           manualTaxableSales: 0,
           manualVatDue: 0,
         });
+        setSalesPurchasesAdjustmentState({
+          increaseTaxableSales: 0,
+          increaseOutputTax: 0,
+          decreaseTaxablePurchases: 0,
+          decreaseInputTax: 0,
+          reducedPurchaseKeys: [],
+          specificPurchasesTaxable: 0,
+          specificPurchasesInputTax: 0,
+          notes: '',
+        });
+        setManualPriorQuarterExcess(0);
       }
     } catch (e) {
       console.error('Failed to reload branch schedule on quarter switch', e);
@@ -408,7 +485,7 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
     }
   }, [storageKey]);
 
-  // Save to localStorage whenever branches, purchasesMode, consolidatedPurchasesFile, hasBranches, deferralState, or checklist tags change
+  // Save to localStorage whenever branches, purchasesMode, consolidatedPurchasesFile, hasBranches, deferralState, salesPurchasesAdjustmentState, manualPriorQuarterExcess, or checklist tags change
   useEffect(() => {
     // Only persist if the current state belongs to the loaded storage key (prevents overwriting on quarter switch)
     if (loadedStorageKeyRef.current !== storageKey) return;
@@ -420,6 +497,8 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
         consolidatedPurchasesFile,
         hasBranches,
         deferralState,
+        salesPurchasesAdjustmentState,
+        manualPriorQuarterExcess,
         governmentSalesKeys,
         has2307SalesKeys,
       };
@@ -434,12 +513,13 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
           purchasesMode,
           consolidatedPurchasesFile,
           deferralState,
+          salesPurchasesAdjustmentState,
         });
       }
     } catch (e) {
       console.error('Failed to persist branch schedule', e);
     }
-  }, [branches, purchasesMode, consolidatedPurchasesFile, hasBranches, deferralState, governmentSalesKeys, has2307SalesKeys, storageKey]);
+  }, [branches, purchasesMode, consolidatedPurchasesFile, hasBranches, deferralState, salesPurchasesAdjustmentState, manualPriorQuarterExcess, governmentSalesKeys, has2307SalesKeys, storageKey]);
 
   // Sync activeBranchId if list changes
   useEffect(() => {
@@ -579,7 +659,9 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
 
         if (fileType === 'purchases' && monthIndex === 'consolidated') {
           setConsolidatedPurchasesFile(parsed);
-          setSyncSuccessMsg(`Loaded Consolidated Purchases Excel (${parsed.rowCount} record(s))`);
+          setSyncSuccessMsg(
+            `Loaded Consolidated Purchases: VATable Purchases ${formatPHP(parsed.totals.taxableAmount)} | Input Tax ${formatPHP(parsed.totals.taxAmount)} | Gross Purchases ${formatPHP(parsed.totals.grossAmount)}${parsed.totals.exemptAmount > 0 ? ` | Exempt Purchases ${formatPHP(parsed.totals.exemptAmount)}` : ''}${parsed.totals.zeroRatedAmount > 0 ? ` | Zero-Rated Purchases ${formatPHP(parsed.totals.zeroRatedAmount)}` : ''}`
+          );
         } else if (branchId) {
           const monthKey = monthIndex === 1 ? 'month1' : monthIndex === 2 ? 'month2' : 'month3';
           setBranches((prev) =>
@@ -605,7 +687,9 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
             })
           );
           setSyncSuccessMsg(
-            `Loaded ${fileType === 'sales' ? 'Sales' : 'Purchases'} Excel for Month ${monthIndex} (${parsed.rowCount} record(s))`
+            fileType === 'purchases'
+              ? `Loaded Purchases for Month ${monthIndex}: VATable Purchases ${formatPHP(parsed.totals.taxableAmount)} | Input Tax ${formatPHP(parsed.totals.taxAmount)} | Gross Purchases ${formatPHP(parsed.totals.grossAmount)}${parsed.totals.exemptAmount > 0 ? ` | Exempt Purchases ${formatPHP(parsed.totals.exemptAmount)}` : ''}${parsed.totals.zeroRatedAmount > 0 ? ` | Zero-Rated Purchases ${formatPHP(parsed.totals.zeroRatedAmount)}` : ''}`
+              : `Loaded Sales Excel for Month ${monthIndex} (${parsed.rowCount} record(s))`
           );
         }
       } catch (err: any) {
@@ -725,6 +809,32 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
   }) => {
     return `${tx.branchId}_${tx.monthIndex}_${tx.tin || 'NOTIN'}_${tx.rowNum}`;
   };
+
+  // Unique key helper for purchase transactions
+  const getPurchasesTxKey = (tx: {
+    branchId: string;
+    monthIndex: number | string;
+    tin?: string;
+    rowNum: number;
+  }) => {
+    return `${tx.branchId}_${tx.monthIndex}_${tx.tin || 'NOTIN'}_${tx.rowNum}`;
+  };
+
+  // All available purchases transactions across consolidated file or per-branch files
+  const allAvailablePurchasesTransactions = useMemo<CombinedPurchasesItem[]>(() => {
+    if (purchasesMode === 'consolidated') {
+      if (!consolidatedPurchasesFile?.transactions) return [];
+      return (consolidatedPurchasesFile.transactions || []).map((tx) => ({
+        ...tx,
+        monthIndex: 0 as const,
+        monthLabel: 'Consolidated',
+        monthName: 'Consolidated Quarter',
+        branchName: 'All Branches (Consolidated)',
+        branchId: 'consolidated',
+      }));
+    }
+    return allQuarterPurchasesTransactions as CombinedPurchasesItem[];
+  }, [purchasesMode, consolidatedPurchasesFile, allQuarterPurchasesTransactions]);
 
   const governmentKeySet = useMemo(() => new Set(governmentSalesKeys), [governmentSalesKeys]);
   const has2307KeySet = useMemo(() => new Set(has2307SalesKeys), [has2307SalesKeys]);
@@ -864,6 +974,19 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
   const hasActiveDeferral =
     totalDeferredTaxable > 0 || totalDeferredOutputTax > 0 || deferredCustomersList.length > 0;
 
+  // Sales Increase Adjustments (Increase Sales [+])
+  const totalIncreaseSalesTaxable = salesPurchasesAdjustmentState.increaseTaxableSales || 0;
+  const totalIncreaseSalesOutputTax = salesPurchasesAdjustmentState.increaseOutputTax || 0;
+
+  // Decrease purchases function removed - purchases remain strictly actual
+  const totalDecreasePurchasesTaxable = 0;
+  const totalDecreasePurchasesInputTax = 0;
+
+  const hasActiveSalesPurchasesAdjustment =
+    totalIncreaseSalesTaxable > 0 || totalIncreaseSalesOutputTax > 0;
+
+  const hasActiveAnyAdjustment = hasActiveDeferral || hasActiveSalesPurchasesAdjustment;
+
   // Aggregate Actual Totals across all branches
   // Per BIR SLSP: Row 1999 Column E = Gross, F = Exempt, G = Zero-Rated, H = Taxable (exclusive of VAT), L = Output/Input Tax
   // Aggregation summary reflects only Columns F, G, H, and L
@@ -966,13 +1089,14 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
 
   // 2. Adjusted Grand Total Vatable Sales (Regular Vatable Sales):
   //    Generic manual deferral deducts ONLY from regular vatable sales (excluding Government, Zero Rated, Exempt).
+  //    Plus additional increased sales from sales & purchases adjustment!
   const adjustedRegularVatableSales = Math.max(
     0,
-    actualRegularVatableSales - totalSpecificDeferred.regularTaxable - manualDefTaxable
+    actualRegularVatableSales - totalSpecificDeferred.regularTaxable - manualDefTaxable + totalIncreaseSalesTaxable
   );
   const adjustedRegularOutputTax = Math.max(
     0,
-    actualRegularOutputTax - totalSpecificDeferred.regularOutputTax - manualDefOutputTax
+    actualRegularOutputTax - totalSpecificDeferred.regularOutputTax - manualDefOutputTax + totalIncreaseSalesOutputTax
   );
 
   // 3. Zero-Rated Sales:
@@ -983,7 +1107,7 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
   //    Based on combined sales data, unaffected by generic deferrals
   const adjustedVatExemptSales = Math.max(0, aggregatedTotals.salesColF - totalSpecificDeferred.exempt);
 
-  // Branch-level Calculations & Pro-Rating of Deferrals
+  // Branch-level Calculations & Pro-Rating of Deferrals and Sales/Purchases Adjustments
   // - Sales to Government are isolated from generic deferrals
   // - Generic manual taxable sales / VAT Due deferral is pro-rated across branches strictly based on their regular taxable sales
   const branchCalculations = useMemo(() => {
@@ -1073,6 +1197,7 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
       0
     );
     const totalActualRegularTaxable = rawBranches.reduce((acc, rb) => acc + rb.branchRegularTaxable, 0);
+    const sumBasePurchasesTaxable = rawBranches.reduce((acc, rb) => acc + rb.bPurchH, 0);
 
     return rawBranches.map((rb) => {
       const baseRegularTaxable = Math.max(0, rb.branchRegularTaxable - rb.specRegularTaxable);
@@ -1089,19 +1214,29 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
       const proRatedManualTaxable = manualDefTaxable * manualRatio;
       const proRatedManualOutputTax = manualDefOutputTax * manualRatio;
 
+      // Sales Increase pro-rated across branches
+      const proRatedIncreaseTaxable = totalIncreaseSalesTaxable * manualRatio;
+      const proRatedIncreaseOutputTax = totalIncreaseSalesOutputTax * manualRatio;
+
       // Adjusted government sales (affected only by specific government deferrals)
       const adjustedGovTaxable = Math.max(0, rb.branchGovTaxable - rb.specGovTaxable);
       const adjustedGovOutputTax = Math.max(0, rb.branchGovOutputTax - rb.specGovOutputTax);
 
-      // Adjusted regular vatable sales (reduced by specific regular deferral and pro-rated manual generic deferral)
+      // Adjusted regular vatable sales (reduced by specific regular deferral and pro-rated manual generic deferral, increased by pro-rated sales increase)
       const adjustedRegularTaxable = Math.max(
         0,
-        rb.branchRegularTaxable - rb.specRegularTaxable - proRatedManualTaxable
+        rb.branchRegularTaxable - rb.specRegularTaxable - proRatedManualTaxable + proRatedIncreaseTaxable
       );
       const adjustedRegularOutputTax = Math.max(
         0,
-        rb.branchRegularOutputTax - rb.specRegularOutputTax - proRatedManualOutputTax
+        rb.branchRegularOutputTax - rb.specRegularOutputTax - proRatedManualOutputTax + proRatedIncreaseOutputTax
       );
+
+      // Purchases remain strictly actual as decrease purchases function has been removed
+      const adjustedBPurchH = rb.bPurchH;
+      const adjustedBPurchL = rb.bPurchL;
+      const totalBranchDecreasePurchases = 0;
+      const totalBranchDecreaseInputTax = 0;
 
       // Total adjusted taxable sales (Col H) & output tax (Col L)
       const adjustedSalesH = adjustedRegularTaxable + adjustedGovTaxable;
@@ -1113,12 +1248,18 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
       const totalBranchDefOutputTax = rb.specOutputTax + proRatedManualOutputTax;
 
       const actualNetVat = rb.actualSalesL - rb.bPurchL;
-      const adjustedNetVat = adjustedSalesL - rb.bPurchL;
+      const adjustedNetVat = adjustedSalesL - (purchasesMode === 'per-branch' ? adjustedBPurchL : 0);
 
       return {
         ...rb,
         proRatedManualTaxable,
         proRatedManualOutputTax,
+        proRatedIncreaseTaxable,
+        proRatedIncreaseOutputTax,
+        adjustedBPurchH,
+        adjustedBPurchL,
+        totalBranchDecreasePurchases,
+        totalBranchDecreaseInputTax,
         totalBranchDefTaxable,
         totalBranchDefOutputTax,
         adjustedGovTaxable,
@@ -1140,10 +1281,12 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
     specificDeferralByBranch,
     manualDefTaxable,
     manualDefOutputTax,
+    totalIncreaseSalesTaxable,
+    totalIncreaseSalesOutputTax,
     governmentKeySet,
   ]);
 
-  // Adjusted Totals (Aggregation rollup reflecting deferrals)
+  // Adjusted Totals (Aggregation rollup reflecting deferrals and sales increase adjustments)
   const adjustedTotals = useMemo(() => {
     let salesColF = 0;
     let salesColG = 0;
@@ -1197,6 +1340,11 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
     [client.id, quarter, year]
   );
 
+  // If there are no data from the previous quarter, use manualPriorQuarterExcess entered by user
+  const effectivePriorQuarterExcess = priorQuarterExcessInfo.hasPreviousData
+    ? priorQuarterExcessInfo.excessInputVat
+    : manualPriorQuarterExcess;
+
   // Handle Sync to Active Form
   const handleSyncToForm = () => {
     if (isVat && onSync2550Q) {
@@ -1208,13 +1356,13 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
         inputPurchasesGoods: displayTotals.purchasesColH,
         inputPurchasesServices: 0,
         inputCapitalGoods: 0,
-        priorQuarterExcessInputVat: priorQuarterExcessInfo.excessInputVat,
+        priorQuarterExcessInputVat: effectivePriorQuarterExcess,
       });
       setSyncSuccessMsg(
         `Successfully synced from all Data to BIR Form 2550Q Schedules 1 & 2! Output Taxable Sales: ${formatPHP(
           displayTotals.salesColH
         )} | Purchases: ${formatPHP(displayTotals.purchasesColH)} | Prior Quarter Excess Input Tax: ${formatPHP(
-          priorQuarterExcessInfo.excessInputVat
+          effectivePriorQuarterExcess
         )}.`
       );
     } else if (!isVat && onSync2551Q) {
@@ -1250,7 +1398,7 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
           zeroRatedSales: displayZeroRatedSales,
           vatExemptSales: displayVatExemptSales,
           inputPurchasesGoods: displayTotals.purchasesColH,
-          priorQuarterExcessInputVat: priorQuarterExcessInfo.excessInputVat,
+          priorQuarterExcessInputVat: effectivePriorQuarterExcess,
         },
       });
     }
@@ -1264,7 +1412,7 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
     displayZeroRatedSales,
     displayVatExemptSales,
     displayTotals.purchasesColH,
-    priorQuarterExcessInfo.excessInputVat,
+    effectivePriorQuarterExcess,
     onBranchScheduleChange,
   ]);
 
@@ -1862,13 +2010,38 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
                           {consolidatedPurchasesFile.rowCount} row(s)
                         </span>
                       </div>
-                      <div className="text-[11px] text-slate-500 flex items-center gap-3 mt-0.5">
-                        <span>Gross: {formatPHP(consolidatedPurchasesFile.totals.grossAmount)}</span>
+                      <div className="text-[11px] text-slate-600 flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 font-sans">
+                        <span>
+                          <strong className="text-slate-700 font-semibold">Gross Purchases:</strong>{' '}
+                          <span className="font-mono font-medium">{formatPHP(consolidatedPurchasesFile.totals.grossAmount)}</span>
+                        </span>
                         <span>•</span>
-                        <span>Taxable: {formatPHP(consolidatedPurchasesFile.totals.taxableAmount)}</span>
+                        <span>
+                          <strong className="text-slate-700 font-semibold">VATable Purchases:</strong>{' '}
+                          <span className="font-mono font-medium">{formatPHP(consolidatedPurchasesFile.totals.taxableAmount)}</span>
+                        </span>
+                        {consolidatedPurchasesFile.totals.exemptAmount > 0 && (
+                          <>
+                            <span>•</span>
+                            <span>
+                              <strong className="text-slate-700 font-semibold">Exempt Purchases:</strong>{' '}
+                              <span className="font-mono font-medium">{formatPHP(consolidatedPurchasesFile.totals.exemptAmount)}</span>
+                            </span>
+                          </>
+                        )}
+                        {consolidatedPurchasesFile.totals.zeroRatedAmount > 0 && (
+                          <>
+                            <span>•</span>
+                            <span>
+                              <strong className="text-slate-700 font-semibold">Zero-Rated Purchases:</strong>{' '}
+                              <span className="font-mono font-medium">{formatPHP(consolidatedPurchasesFile.totals.zeroRatedAmount)}</span>
+                            </span>
+                          </>
+                        )}
                         <span>•</span>
-                        <span className="font-semibold text-slate-700">
-                          Input Tax: {formatPHP(consolidatedPurchasesFile.totals.taxAmount)}
+                        <span className="font-semibold text-amber-900">
+                          <strong>Input Tax:</strong>{' '}
+                          <span className="font-mono text-amber-700 font-bold">{formatPHP(consolidatedPurchasesFile.totals.taxAmount)}</span>
                         </span>
                       </div>
                     </div>
@@ -2349,20 +2522,30 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
                               </span>
                             </div>
 
-                            <div className="bg-white p-2 rounded-lg border border-amber-200 text-[11px] space-y-1">
+                            <div className="bg-white p-2.5 rounded-lg border border-amber-200 text-[11px] space-y-1.5">
                               <div className="flex justify-between text-slate-600">
-                                <span>Gross Purchases:</span>
+                                <span className="font-medium text-slate-700">Gross Purchases:</span>
                                 <span className="font-mono font-medium">{formatPHP(uploadedFile.totals.grossAmount)}</span>
                               </div>
                               <div className="flex justify-between text-slate-600">
-                                <span>Goods / Services:</span>
-                                <span className="font-mono font-medium">
-                                  {formatPHP(uploadedFile.totals.goodsOtherThanCapitalAmount + uploadedFile.totals.servicesAmount)}
-                                </span>
+                                <span className="font-medium text-slate-700">VATable Purchases:</span>
+                                <span className="font-mono font-medium">{formatPHP(uploadedFile.totals.taxableAmount)}</span>
                               </div>
-                              <div className="flex justify-between text-slate-900 font-semibold border-t border-slate-100 pt-1">
-                                <span>Input Tax:</span>
-                                <span className="font-mono text-amber-700">{formatPHP(uploadedFile.totals.taxAmount)}</span>
+                              {uploadedFile.totals.exemptAmount > 0 && (
+                                <div className="flex justify-between text-slate-600">
+                                  <span className="font-medium text-slate-700">Exempt Purchases:</span>
+                                  <span className="font-mono font-medium">{formatPHP(uploadedFile.totals.exemptAmount)}</span>
+                                </div>
+                              )}
+                              {uploadedFile.totals.zeroRatedAmount > 0 && (
+                                <div className="flex justify-between text-slate-600">
+                                  <span className="font-medium text-slate-700">Zero-Rated Purchases:</span>
+                                  <span className="font-mono font-medium">{formatPHP(uploadedFile.totals.zeroRatedAmount)}</span>
+                                </div>
+                              )}
+                              <div className="flex justify-between text-slate-900 font-semibold border-t border-slate-100 pt-1.5">
+                                <span className="text-amber-950 font-bold">Input Tax:</span>
+                                <span className="font-mono font-bold text-amber-700">{formatPHP(uploadedFile.totals.taxAmount)}</span>
                               </div>
                             </div>
 
@@ -2453,10 +2636,10 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
                         ? 'bg-violet-700 text-white font-bold shadow-2xs'
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
-                    title="View adjusted figures reflecting customer and manual sales deferrals"
+                    title="View adjusted figures reflecting deferrals, sales increases, and purchases reductions"
                   >
-                    <span>Adjusted (Deferred)</span>
-                    {hasActiveDeferral && (
+                    <span>Adjusted (Deferred / Sales &amp; Purch)</span>
+                    {hasActiveAnyAdjustment && (
                       <span
                         className={`text-[10px] px-1.5 py-0.2 rounded-full font-semibold ${
                           summaryViewMode === 'adjusted'
@@ -2571,13 +2754,13 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
                       <span>Exempt Purchases</span>
                     </th>
                     <th className="py-2 px-2.5 text-right bg-amber-50/60 font-semibold border-r border-slate-200">
-                      <span>Zero-Rated Purch.</span>
+                      <span>Zero-Rated Purchases</span>
                     </th>
                     <th className="py-2 px-2.5 text-right bg-amber-50/60 font-semibold border-r border-slate-200">
-                      <span>Taxable (Excl. VAT)</span>
+                      <span>VATable Purchases</span>
                     </th>
                     <th className="py-2 px-2.5 text-right bg-amber-100/50 font-bold text-amber-900 border-r border-amber-200">
-                      <span>Input Tax (VAT)</span>
+                      <span>Input Tax</span>
                     </th>
                   </tr>
                 </thead>
@@ -2592,8 +2775,14 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
 
                     const bPurchF = bCalc.bPurchF;
                     const bPurchG = bCalc.bPurchG;
-                    const bPurchH = bCalc.bPurchH;
-                    const bPurchL = bCalc.bPurchL;
+                    const bPurchH =
+                      summaryViewMode === 'adjusted' && purchasesMode === 'per-branch'
+                        ? bCalc.adjustedBPurchH
+                        : bCalc.bPurchH;
+                    const bPurchL =
+                      summaryViewMode === 'adjusted' && purchasesMode === 'per-branch'
+                        ? bCalc.adjustedBPurchL
+                        : bCalc.bPurchL;
 
                     const branchNetVat = summaryViewMode === 'adjusted' ? bCalc.adjustedNetVat : bCalc.actualNetVat;
 
@@ -2605,9 +2794,32 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
                             <Building className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                             <span className="truncate">{b.name}</span>
                           </div>
-                          {summaryViewMode === 'adjusted' && bCalc.totalBranchDefTaxable > 0 && (
-                            <div className="text-[10px] text-violet-600 font-mono mt-0.5" title={`Specific: -${formatPHP(bCalc.specTaxable)}, Pro-rated: -${formatPHP(bCalc.proRatedManualTaxable)}`}>
-                              -{formatPHP(bCalc.totalBranchDefTaxable)} deferred
+                          {summaryViewMode === 'adjusted' && (
+                            <div className="flex flex-col gap-0.5 mt-0.5">
+                              {bCalc.totalBranchDefTaxable > 0 && (
+                                <div
+                                  className="text-[10px] text-violet-600 font-mono"
+                                  title={`Specific: -${formatPHP(bCalc.specTaxable)}, Pro-rated: -${formatPHP(bCalc.proRatedManualTaxable)}`}
+                                >
+                                  -{formatPHP(bCalc.totalBranchDefTaxable)} deferred
+                                </div>
+                              )}
+                              {bCalc.proRatedIncreaseTaxable > 0 && (
+                                <div
+                                  className="text-[10px] text-emerald-600 font-mono"
+                                  title={`Increased Sales: +${formatPHP(bCalc.proRatedIncreaseTaxable)}`}
+                                >
+                                  +{formatPHP(bCalc.proRatedIncreaseTaxable)} sales
+                                </div>
+                              )}
+                              {bCalc.totalBranchDecreasePurchases > 0 && purchasesMode === 'per-branch' && (
+                                <div
+                                  className="text-[10px] text-amber-600 font-mono"
+                                  title={`Decreased Purchases: -${formatPHP(bCalc.totalBranchDecreasePurchases)}`}
+                                >
+                                  -{formatPHP(bCalc.totalBranchDecreasePurchases)} purch
+                                </div>
+                              )}
                             </div>
                           )}
                         </td>
@@ -2663,21 +2875,21 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
 
                       {/* Purchases cols */}
                       <td className="py-2 px-2.5 text-right font-mono text-slate-700 border-r border-slate-200">
-                        {formatPHP(aggregatedTotals.purchasesColF)}
+                        {formatPHP(displayTotals.purchasesColF)}
                       </td>
                       <td className="py-2 px-2.5 text-right font-mono text-slate-700 border-r border-slate-200">
-                        {formatPHP(aggregatedTotals.purchasesColG)}
+                        {formatPHP(displayTotals.purchasesColG)}
                       </td>
                       <td className="py-2 px-2.5 text-right font-mono font-medium text-slate-900 border-r border-slate-200">
-                        {formatPHP(aggregatedTotals.purchasesColH)}
+                        {formatPHP(displayTotals.purchasesColH)}
                       </td>
                       <td className="py-2 px-2.5 text-right font-mono font-bold text-amber-800 bg-amber-100/40 border-r border-amber-200">
-                        {formatPHP(aggregatedTotals.purchasesColL)}
+                        {formatPHP(displayTotals.purchasesColL)}
                       </td>
 
                       {/* Net Effect */}
                       <td className="py-2 px-3.5 text-right font-mono font-semibold text-amber-900">
-                        -{formatPHP(aggregatedTotals.purchasesColL)}
+                        -{formatPHP(displayTotals.purchasesColL)}
                       </td>
                     </tr>
                   )}
@@ -2737,22 +2949,32 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
               </table>
             </div>
 
-            {/* Deferred Sales & VAT Adjustments Section under the Multi-Branch Aggregation Summary Table */}
-            <div className="mt-3 p-3.5 bg-gradient-to-r from-violet-50/70 via-slate-50 to-indigo-50/70 border border-violet-200/80 rounded-xl shadow-2xs space-y-3">
+            {/* Deferred Sales & VAT Adjustments + Increase Sales Section */}
+            <div className="mt-3 p-3.5 bg-gradient-to-r from-violet-50/70 via-slate-50 to-emerald-50/60 border border-slate-200/90 rounded-xl shadow-2xs space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="flex items-start sm:items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-violet-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-700 to-indigo-800 text-white flex items-center justify-center shrink-0 shadow-2xs">
                     <Calculator className="w-4 h-4" />
                   </div>
                   <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-xs font-bold text-slate-900">
-                        Deferred Sales & VAT Due Adjustments
+                        VAT Compliance &amp; Basis Adjustments
                       </span>
-                      {hasActiveDeferral ? (
-                        <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
-                          Active Deferrals Applied
-                        </span>
+                      {hasActiveAnyAdjustment ? (
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {hasActiveDeferral && (
+                            <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-violet-100 text-violet-800 border border-violet-200">
+                              Deferred Sales Active
+                            </span>
+                          )}
+                          {hasActiveSalesPurchasesAdjustment && (
+                            <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
+                              <TrendingUp className="w-2.5 h-2.5" />
+                              Sales (+) / Purchases (-) Active
+                            </span>
+                          )}
+                        </div>
                       ) : (
                         <span className="px-2 py-0.5 text-[10px] font-medium rounded-full bg-slate-200/80 text-slate-700">
                           None Active
@@ -2763,16 +2985,34 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
                 </div>
 
                 <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                  {/* Button 1: Deferred Adjustments */}
                   <button
                     type="button"
                     id="open-deferred-sales-btn"
                     onClick={() => setShowDeferralModal(true)}
-                    className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-violet-700 hover:bg-violet-800 text-white rounded-lg shadow-xs transition-colors cursor-pointer"
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold bg-violet-700 hover:bg-violet-800 text-white rounded-lg shadow-xs transition-colors cursor-pointer"
+                    title="Open Deferred Sales & VAT Due Adjustments"
                   >
                     <Calculator className="w-3.5 h-3.5" />
                     <span>Deferred Adjustments</span>
                   </button>
 
+                  {/* Button 2: Increase Sales */}
+                  <button
+                    type="button"
+                    id="open-sales-purchases-adjustment-btn"
+                    onClick={() => setShowSalesPurchasesAdjustmentModal(true)}
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg shadow-xs transition-colors cursor-pointer"
+                    title="Open Increase Sales (+) Adjustment"
+                  >
+                    <TrendingUp className="w-3.5 h-3.5" />
+                    <span>Increase Sales</span>
+                    {hasActiveSalesPurchasesAdjustment && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                    )}
+                  </button>
+
+                  {/* Clear Deferrals Button */}
                   {hasActiveDeferral && (
                     <button
                       type="button"
@@ -2790,44 +3030,106 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
                       Clear Deferrals
                     </button>
                   )}
+
+                  {/* Clear Sales Increase Adjustments Button */}
+                  {hasActiveSalesPurchasesAdjustment && (
+                    <button
+                      type="button"
+                      id="clear-sales-purchases-adjustment-btn"
+                      onClick={() =>
+                        setSalesPurchasesAdjustmentState({
+                          increaseTaxableSales: 0,
+                          increaseOutputTax: 0,
+                          decreaseTaxablePurchases: 0,
+                          decreaseInputTax: 0,
+                          reducedPurchaseKeys: [],
+                          specificPurchasesTaxable: 0,
+                          specificPurchasesInputTax: 0,
+                          notes: '',
+                        })
+                      }
+                      className="px-2.5 py-2 text-xs font-medium text-slate-600 hover:text-rose-600 hover:bg-rose-50 border border-slate-300 hover:border-rose-200 rounded-lg transition-colors cursor-pointer"
+                      title="Clear Increase Sales adjustments"
+                    >
+                      Clear Sales Increase
+                    </button>
+                  )}
                 </div>
               </div>
 
               {/* Active Deferral Breakdown Cards */}
               {hasActiveDeferral && (
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1 text-xs">
-                  <div className="p-2.5 bg-white rounded-lg border border-violet-100 shadow-2xs">
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">
-                      Deferred Taxable Sales
-                    </span>
-                    <span className="text-sm font-bold text-violet-700 font-mono">
-                      {formatPHP(totalDeferredTaxable)}
-                    </span>
+                <div className="space-y-1 pt-1">
+                  <span className="text-[10px] font-bold text-violet-900 uppercase tracking-wider block">
+                    Deferred Sales Summary:
+                  </span>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+                    <div className="p-2.5 bg-white rounded-lg border border-violet-100 shadow-2xs">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">
+                        Deferred Taxable Sales
+                      </span>
+                      <span className="text-sm font-bold text-violet-700 font-mono">
+                        {formatPHP(totalDeferredTaxable)}
+                      </span>
+                    </div>
+                    <div className="p-2.5 bg-white rounded-lg border border-violet-100 shadow-2xs">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">
+                        Deferred VAT Due (12%)
+                      </span>
+                      <span className="text-sm font-bold text-violet-900 font-mono">
+                        {formatPHP(totalDeferredOutputTax)}
+                      </span>
+                    </div>
+                    <div className="p-2.5 bg-white rounded-lg border border-violet-100 shadow-2xs">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">
+                        Deferred Companies
+                      </span>
+                      <span className="text-sm font-bold text-slate-900">
+                        {deferredCustomersList.length} transaction{deferredCustomersList.length === 1 ? '' : 's'}
+                      </span>
+                    </div>
+                    <div className="p-2.5 bg-white rounded-lg border border-violet-100 shadow-2xs">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">
+                        Manual Pro-rated Sales
+                      </span>
+                      <span className="text-sm font-bold text-slate-900 font-mono">
+                        {formatPHP(manualDefTaxable)}
+                      </span>
+                    </div>
                   </div>
-                  <div className="p-2.5 bg-white rounded-lg border border-violet-100 shadow-2xs">
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">
-                      Deferred VAT Due (12%)
-                    </span>
-                    <span className="text-sm font-bold text-violet-900 font-mono">
-                      {formatPHP(totalDeferredOutputTax)}
-                    </span>
+                </div>
+              )}
+
+              {/* Active Increase Sales Breakdown Cards */}
+              {hasActiveSalesPurchasesAdjustment && (
+                <div className="space-y-1 pt-1 border-t border-slate-200/70">
+                  <span className="text-[10px] font-bold text-emerald-900 uppercase tracking-wider block flex items-center gap-1.5">
+                    <TrendingUp className="w-3 h-3 text-emerald-600" />
+                    Sales Increase Summary:
+                  </span>
+                  <div className="grid grid-cols-2 gap-2.5 text-xs">
+                    <div className="p-2.5 bg-white rounded-lg border border-emerald-100 shadow-2xs">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">
+                        Taxable Sales Added (+)
+                      </span>
+                      <span className="text-sm font-bold text-emerald-700 font-mono">
+                        +{formatPHP(totalIncreaseSalesTaxable)}
+                      </span>
+                    </div>
+                    <div className="p-2.5 bg-white rounded-lg border border-emerald-100 shadow-2xs">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">
+                        Output VAT Added (12%)
+                      </span>
+                      <span className="text-sm font-bold text-emerald-800 font-mono">
+                        +{formatPHP(totalIncreaseSalesOutputTax)}
+                      </span>
+                    </div>
                   </div>
-                  <div className="p-2.5 bg-white rounded-lg border border-violet-100 shadow-2xs">
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">
-                      Deferred Companies
-                    </span>
-                    <span className="text-sm font-bold text-slate-900">
-                      {deferredCustomersList.length} transaction{deferredCustomersList.length === 1 ? '' : 's'}
-                    </span>
-                  </div>
-                  <div className="p-2.5 bg-white rounded-lg border border-violet-100 shadow-2xs">
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">
-                      Manual Pro-rated Sales
-                    </span>
-                    <span className="text-sm font-bold text-slate-900 font-mono">
-                      {formatPHP(manualDefTaxable)}
-                    </span>
-                  </div>
+                  {salesPurchasesAdjustmentState.notes && (
+                    <div className="text-[11px] text-slate-500 italic px-1">
+                      Note: {salesPurchasesAdjustmentState.notes}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -2920,11 +3222,11 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
                     <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
                     <span>Schedule 2: Purchases &amp; Allowable Input Tax Breakdown</span>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {/* Domestic Purchases of Goods */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                    {/* VATable Purchases */}
                     <div className="p-3 bg-blue-50/70 border border-blue-200/80 rounded-lg">
                       <div className="text-[11px] font-bold text-blue-950 uppercase tracking-wide flex items-center justify-between">
-                        <span>Domestic Purchases of Goods</span>
+                        <span>VATable Purchases</span>
                         <span className="text-[10px] font-mono text-blue-700 font-semibold">
                           Input Tax: {formatPHP(displayTotals.purchasesColL)}
                         </span>
@@ -2934,23 +3236,82 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
                       </div>
                     </div>
 
+                    {/* Exempt Purchases (Only reflected if > 0) */}
+                    {displayTotals.purchasesColF > 0 && (
+                      <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                        <div className="text-[11px] font-bold text-slate-800 uppercase tracking-wide">
+                          <span>Exempt Purchases</span>
+                        </div>
+                        <div className="text-lg font-bold font-mono text-slate-800 mt-1">
+                          {formatPHP(displayTotals.purchasesColF)}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Zero-Rated Purchases (Only reflected if > 0) */}
+                    {displayTotals.purchasesColG > 0 && (
+                      <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                        <div className="text-[11px] font-bold text-slate-800 uppercase tracking-wide">
+                          <span>Zero-Rated Purchases</span>
+                        </div>
+                        <div className="text-lg font-bold font-mono text-slate-800 mt-1">
+                          {formatPHP(displayTotals.purchasesColG)}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Prior Quarter's Excess Input Tax */}
                     <div className="p-3 bg-amber-50/70 border border-amber-200/80 rounded-lg">
                       <div className="text-[11px] font-bold text-amber-950 uppercase tracking-wide flex items-center justify-between">
                         <span>Prior Quarter's Excess Input Tax</span>
                         <span
-                          className={`text-[10px] font-bold px-1.5 py-0.2 rounded-full ${
-                            priorQuarterExcessInfo.excessInputVat > 0
-                              ? 'bg-amber-200 text-amber-900'
-                              : 'bg-slate-200 text-slate-700'
+                          className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-1 ${
+                            priorQuarterExcessInfo.hasPreviousData
+                              ? priorQuarterExcessInfo.excessInputVat > 0
+                                ? 'bg-amber-200 text-amber-900'
+                                : 'bg-slate-200 text-slate-700'
+                              : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
                           }`}
                         >
-                          {priorQuarterExcessInfo.excessInputVat > 0 ? 'Negative Prev VAT Due' : '₱0.00 (Not Negative)'}
+                          {priorQuarterExcessInfo.hasPreviousData ? (
+                            <>
+                              <Lock className="w-2.5 h-2.5" />
+                              <span>
+                                {priorQuarterExcessInfo.excessInputVat > 0
+                                  ? 'Locked (Prev Qtr Data)'
+                                  : 'Locked (₱0.00)'}
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <Unlock className="w-2.5 h-2.5 text-emerald-700" />
+                              <span>Editable (No Prev Qtr Data)</span>
+                            </>
+                          )}
                         </span>
                       </div>
-                      <div className="text-lg font-bold font-mono text-amber-800 mt-1">
-                        {formatPHP(priorQuarterExcessInfo.excessInputVat)}
-                      </div>
+                      {priorQuarterExcessInfo.hasPreviousData ? (
+                        <div className="text-lg font-bold font-mono text-amber-800 mt-1">
+                          {formatPHP(priorQuarterExcessInfo.excessInputVat)}
+                        </div>
+                      ) : (
+                        <div className="relative mt-1.5">
+                          <span className="absolute left-2.5 top-2 text-xs text-amber-700 font-mono font-bold">
+                            ₱
+                          </span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={manualPriorQuarterExcess || ''}
+                            onChange={(e) =>
+                              setManualPriorQuarterExcess(parseFloat(e.target.value) || 0)
+                            }
+                            placeholder="0.00"
+                            className="w-full pl-6 pr-3 py-1.5 text-base font-mono font-bold text-right bg-white text-amber-900 border border-amber-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+                          />
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -3060,7 +3421,7 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
               </button>
             </div>
 
-            <div className="p-4 bg-slate-50 border-b border-slate-200 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+            <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs">
               <div>
                 <span className="text-slate-500 block">Header TIN:</span>
                 <span className="font-mono font-medium text-slate-900">{previewFile.tinHeader || 'N/A'}</span>
@@ -3070,12 +3431,36 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
                 <span className="font-medium text-slate-900 truncate block">{previewFile.ownerNameHeader || 'N/A'}</span>
               </div>
               <div>
-                <span className="text-slate-500 block">Total Gross:</span>
+                <span className="text-slate-500 block font-medium">
+                  {previewFile.fileType === 'purchases' ? 'Gross Purchases:' : 'Total Gross:'}
+                </span>
                 <span className="font-mono font-bold text-slate-900">{formatPHP(previewFile.totals.grossAmount)}</span>
               </div>
               <div>
-                <span className="text-slate-500 block">Total Tax:</span>
-                <span className="font-mono font-bold text-violet-700">{formatPHP(previewFile.totals.taxAmount)}</span>
+                <span className="text-slate-500 block font-medium">
+                  {previewFile.fileType === 'purchases' ? 'VATable Purchases:' : 'Taxable Sales:'}
+                </span>
+                <span className="font-mono font-bold text-slate-900">{formatPHP(previewFile.totals.taxableAmount)}</span>
+              </div>
+              {previewFile.fileType === 'purchases' && previewFile.totals.exemptAmount > 0 && (
+                <div>
+                  <span className="text-slate-500 block font-medium">Exempt Purchases:</span>
+                  <span className="font-mono font-bold text-slate-800">{formatPHP(previewFile.totals.exemptAmount)}</span>
+                </div>
+              )}
+              {previewFile.fileType === 'purchases' && previewFile.totals.zeroRatedAmount > 0 && (
+                <div>
+                  <span className="text-slate-500 block font-medium">Zero-Rated Purchases:</span>
+                  <span className="font-mono font-bold text-slate-800">{formatPHP(previewFile.totals.zeroRatedAmount)}</span>
+                </div>
+              )}
+              <div>
+                <span className="text-slate-500 block font-medium">
+                  {previewFile.fileType === 'purchases' ? 'Input Tax:' : 'Output Tax:'}
+                </span>
+                <span className={`font-mono font-bold ${previewFile.fileType === 'purchases' ? 'text-amber-700' : 'text-violet-700'}`}>
+                  {formatPHP(previewFile.totals.taxAmount)}
+                </span>
               </div>
             </div>
 
@@ -3089,9 +3474,21 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
                       <th className="py-2 px-2">TIN</th>
                       <th className="py-2 px-3">Registered Name</th>
                       <th className="py-2 px-3">Address</th>
-                      <th className="py-2 px-2 text-right">Gross</th>
-                      <th className="py-2 px-2 text-right">Taxable</th>
-                      <th className="py-2 px-2 text-right">Tax</th>
+                      <th className="py-2 px-2 text-right">
+                        {previewFile.fileType === 'purchases' ? 'Gross Purchases' : 'Gross'}
+                      </th>
+                      <th className="py-2 px-2 text-right">
+                        {previewFile.fileType === 'purchases' ? 'VATable Purchases' : 'Taxable'}
+                      </th>
+                      {previewFile.fileType === 'purchases' && previewFile.totals.exemptAmount > 0 && (
+                        <th className="py-2 px-2 text-right">Exempt Purchases</th>
+                      )}
+                      {previewFile.fileType === 'purchases' && previewFile.totals.zeroRatedAmount > 0 && (
+                        <th className="py-2 px-2 text-right">Zero-Rated Purchases</th>
+                      )}
+                      <th className="py-2 px-2 text-right">
+                        {previewFile.fileType === 'purchases' ? 'Input Tax' : 'Tax'}
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 font-mono">
@@ -3104,14 +3501,22 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
                         <td className="py-1.5 px-3 font-sans text-slate-600 truncate max-w-[150px]">{t.address}</td>
                         <td className="py-1.5 px-2 text-right text-slate-800">{formatPHP(t.grossAmount)}</td>
                         <td className="py-1.5 px-2 text-right text-slate-800">{formatPHP(t.taxableAmount)}</td>
-                        <td className="py-1.5 px-2 text-right font-bold text-violet-700">{formatPHP(t.taxAmount)}</td>
+                        {previewFile.fileType === 'purchases' && previewFile.totals.exemptAmount > 0 && (
+                          <td className="py-1.5 px-2 text-right text-slate-600">{formatPHP(t.exemptAmount)}</td>
+                        )}
+                        {previewFile.fileType === 'purchases' && previewFile.totals.zeroRatedAmount > 0 && (
+                          <td className="py-1.5 px-2 text-right text-slate-600">{formatPHP(t.zeroRatedAmount)}</td>
+                        )}
+                        <td className={`py-1.5 px-2 text-right font-bold ${previewFile.fileType === 'purchases' ? 'text-amber-700' : 'text-violet-700'}`}>
+                          {formatPHP(t.taxAmount)}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               ) : (
                 <div className="py-12 text-center text-slate-500 text-xs">
-                  No individual line items entered. Summary totals were read directly from Report Summary Row 1999.
+                  No individual line items entered. Summary totals were read directly from Grand Total row.
                 </div>
               )}
             </div>
@@ -3956,6 +4361,33 @@ export const BranchVatSchedule: React.FC<BranchVatScheduleProps> = ({
           }}
           totalActualTaxableSales={aggregatedTotals.salesColH}
           totalActualOutputTax={aggregatedTotals.salesColL}
+        />
+      )}
+
+      {/* Sales (+) & Purchases (-) Adjustment Modal */}
+      {showSalesPurchasesAdjustmentModal && (
+        <SalesAndPurchasesAdjustmentModal
+          isOpen={showSalesPurchasesAdjustmentModal}
+          onClose={() => setShowSalesPurchasesAdjustmentModal(false)}
+          client={client}
+          year={year}
+          quarter={quarter}
+          allPurchasesTransactions={allAvailablePurchasesTransactions}
+          adjustmentState={salesPurchasesAdjustmentState}
+          onSave={(newState) => {
+            setSalesPurchasesAdjustmentState(newState);
+            setSummaryViewMode('adjusted');
+            setShowSalesPurchasesAdjustmentModal(false);
+            setSyncSuccessMsg(
+              'Increase Sales adjustment applied to Multi-Branch Aggregation!'
+            );
+            setTimeout(() => setSyncSuccessMsg(null), 4000);
+          }}
+          totalActualTaxableSales={aggregatedTotals.salesColH}
+          totalActualOutputTax={aggregatedTotals.salesColL}
+          totalActualTaxablePurchases={aggregatedTotals.purchasesColH}
+          totalActualInputTax={aggregatedTotals.purchasesColL}
+          branches={branches}
         />
       )}
 

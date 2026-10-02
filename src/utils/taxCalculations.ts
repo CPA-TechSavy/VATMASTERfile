@@ -220,32 +220,48 @@ export interface Result2550Q {
   totalTaxCredits: number;
   netVatPayable: number;
   isExcessInputVat: boolean;
+  carriedOverExcessInputTax: number;
 }
 
 export function calculate2550Q(data: Data2550Q): Result2550Q {
   const totalSales =
-    data.vatableSales + data.salesToGovernment + data.zeroRatedSales + data.vatExemptSales;
-  const outputTax = (data.vatableSales + data.salesToGovernment) * 0.12;
+    (data.vatableSales || 0) +
+    (data.salesToGovernment || 0) +
+    (data.zeroRatedSales || 0) +
+    (data.vatExemptSales || 0);
+  const outputTax = ((data.vatableSales || 0) + (data.salesToGovernment || 0)) * 0.12;
 
   const inputTaxPurchases =
-    (data.inputPurchasesGoods +
-      data.inputPurchasesServices +
-      data.inputCapitalGoods +
-      data.inputImportations) *
+    ((data.inputPurchasesGoods || 0) +
+      (data.inputPurchasesServices || 0) +
+      (data.inputCapitalGoods || 0) +
+      (data.inputImportations || 0)) *
     0.12;
 
-  const totalAvailableInputTax = inputTaxPurchases + data.priorQuarterExcessInputVat;
+  const totalAvailableInputTax = inputTaxPurchases + (data.priorQuarterExcessInputVat || 0);
 
   const netVatBeforeCredits = Math.max(0, outputTax - totalAvailableInputTax);
   const excessInputTax = Math.max(0, totalAvailableInputTax - outputTax);
 
   const totalTaxCredits =
-    data.withheldVat2307Govt + data.withheldVat2307Private + data.priorPaymentsThisQuarter;
+    (data.withheldVat2307Govt || 0) +
+    (data.withheldVat2307Private || 0) +
+    (data.priorPaymentsThisQuarter || 0);
 
-  const netVatPayable = netVatBeforeCredits - totalTaxCredits;
+  const rawNetVatPayable = netVatBeforeCredits - totalTaxCredits;
+
+  // Rule 3: In computing the Net VAT Payable (To BIR), if the amount is negative,
+  // add the amount in Schedule 3: Tax Credits & Withholding VAT to further increase
+  // the carried over of Prior Quarter's Excess Input Tax for the next quarter.
+  let carriedOverExcessInputTax = 0;
+  if (rawNetVatPayable < 0) {
+    carriedOverExcessInputTax = excessInputTax + totalTaxCredits;
+  } else if (excessInputTax > 0) {
+    carriedOverExcessInputTax = excessInputTax;
+  }
 
   return {
-    vatableSales: data.vatableSales,
+    vatableSales: data.vatableSales || 0,
     outputTax,
     totalSales,
     inputTaxPurchases,
@@ -253,8 +269,9 @@ export function calculate2550Q(data: Data2550Q): Result2550Q {
     netVatBeforeCredits,
     excessInputTax,
     totalTaxCredits,
-    netVatPayable,
-    isExcessInputVat: excessInputTax > 0 || netVatPayable < 0,
+    netVatPayable: rawNetVatPayable,
+    isExcessInputVat: rawNetVatPayable < 0 || excessInputTax > 0,
+    carriedOverExcessInputTax,
   };
 }
 
@@ -282,14 +299,33 @@ export interface PriorQuarterExcessInputVatResult {
   prevVatDue: number | null;
   prevQuarter: Quarter;
   prevYear: number;
-  source: 'branch_schedule' | '2550q_map' | 'initial_data' | 'none';
+  source: 'branch_schedule' | '2550q_map' | 'saved_quarter' | 'initial_data' | 'none';
+  hasPreviousData: boolean;
   explanation: string;
+}
+
+function hasActualQuarterData(d: any): boolean {
+  if (!d) return false;
+  return (
+    (Number(d.vatableSales) || 0) > 0 ||
+    (Number(d.salesToGovernment) || 0) > 0 ||
+    (Number(d.zeroRatedSales) || 0) > 0 ||
+    (Number(d.vatExemptSales) || 0) > 0 ||
+    (Number(d.inputPurchasesGoods) || 0) > 0 ||
+    (Number(d.inputPurchasesServices) || 0) > 0 ||
+    (Number(d.inputCapitalGoods) || 0) > 0 ||
+    (Number(d.inputImportations) || 0) > 0 ||
+    (Number(d.withheldVat2307Govt) || 0) > 0 ||
+    (Number(d.withheldVat2307Private) || 0) > 0 ||
+    (Number(d.priorPaymentsThisQuarter) || 0) > 0
+  );
 }
 
 /**
  * Computes Schedule 2 Prior Quarter's Excess Input Tax based on previous Quarter's VAT Due.
  * Rule: It must be based on previous Quarter VAT Due ONLY IF the VAT Due from previous Quarter is Negative.
- * Otherwise, if it is not negative (i.e. zero or positive payable), put zero.
+ * If negative, adds Schedule 3 Tax Credits & Withholding VAT to further increase the carried over excess input tax.
+ * If there are no data from the previous quarter, hasPreviousData is false so that the amount box is editable.
  */
 export function getPriorQuarterExcessInputVat(
   clientId: string,
@@ -301,7 +337,81 @@ export function getPriorQuarterExcessInputVat(
     currentYear
   );
 
-  // 1. Try checking saved multi-branch schedule for the previous quarter
+  // 1. First, check dedicated saved quarter key for Form 2550Q in localStorage
+  try {
+    const explicitQuarterKey = `bir_saved_2550q_${clientId}_${prevYear}_${prevQuarter}`;
+    const rawSaved = typeof window !== 'undefined' ? localStorage.getItem(explicitQuarterKey) : null;
+    if (rawSaved) {
+      const parsed = JSON.parse(rawSaved);
+      if (parsed?.data && hasActualQuarterData(parsed.data)) {
+        const prevRes = calculate2550Q(parsed.data);
+        if (prevRes.isExcessInputVat && prevRes.carriedOverExcessInputTax > 0) {
+          return {
+            excessInputVat: prevRes.carriedOverExcessInputTax,
+            prevVatDue: prevRes.netVatPayable,
+            prevQuarter,
+            prevYear,
+            source: 'saved_quarter',
+            hasPreviousData: true,
+            explanation: `Previous Quarter (${prevQuarter} ${prevYear}) Net VAT was negative (-₱${Math.abs(prevRes.netVatPayable).toLocaleString('en-PH', { minimumFractionDigits: 2 })}). Transferred ₱${prevRes.excessInputTax.toLocaleString('en-PH', { minimumFractionDigits: 2 })} excess input tax + ₱${prevRes.totalTaxCredits.toLocaleString('en-PH', { minimumFractionDigits: 2 })} Schedule 3 Tax Credits = ₱${prevRes.carriedOverExcessInputTax.toLocaleString('en-PH', { minimumFractionDigits: 2 })}.`,
+          };
+        } else {
+          return {
+            excessInputVat: 0,
+            prevVatDue: prevRes.netVatPayable,
+            prevQuarter,
+            prevYear,
+            source: 'saved_quarter',
+            hasPreviousData: true,
+            explanation: `Previous Quarter (${prevQuarter} ${prevYear}) Net VAT Payable was positive (₱${prevRes.netVatPayable.toLocaleString('en-PH', { minimumFractionDigits: 2 })}). Excess set to ₱0.00.`,
+          };
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Error reading explicit quarter 2550Q data', e);
+  }
+
+  // 2. Check saved BIR Form 2550Q data map in localStorage (bir_app_data_v2_2550Q or bir_calc_data_2550Q)
+  try {
+    const raw2550Q =
+      typeof window !== 'undefined'
+        ? localStorage.getItem('bir_app_data_v2_2550Q') || localStorage.getItem('bir_calc_data_2550Q')
+        : null;
+    if (raw2550Q) {
+      const map = JSON.parse(raw2550Q);
+      const prevKey = `${clientId}_${prevYear}_${prevQuarter}`;
+      const prevData = map[prevKey];
+      if (prevData && hasActualQuarterData(prevData)) {
+        const prevRes = calculate2550Q(prevData);
+        if (prevRes.isExcessInputVat && prevRes.carriedOverExcessInputTax > 0) {
+          return {
+            excessInputVat: prevRes.carriedOverExcessInputTax,
+            prevVatDue: prevRes.netVatPayable,
+            prevQuarter,
+            prevYear,
+            source: '2550q_map',
+            hasPreviousData: true,
+            explanation: `Previous Quarter (${prevQuarter} ${prevYear}) Form 2550Q Net VAT was negative (-₱${Math.abs(prevRes.netVatPayable).toLocaleString('en-PH', { minimumFractionDigits: 2 })}). Transferred ₱${prevRes.excessInputTax.toLocaleString('en-PH', { minimumFractionDigits: 2 })} excess input tax + ₱${prevRes.totalTaxCredits.toLocaleString('en-PH', { minimumFractionDigits: 2 })} Schedule 3 Tax Credits = ₱${prevRes.carriedOverExcessInputTax.toLocaleString('en-PH', { minimumFractionDigits: 2 })}.`,
+          };
+        } else {
+          return {
+            excessInputVat: 0,
+            prevVatDue: prevRes.netVatPayable,
+            prevQuarter,
+            prevYear,
+            source: '2550q_map',
+            hasPreviousData: true,
+            explanation: `Previous Quarter (${prevQuarter} ${prevYear}) Form 2550Q Net VAT Payable was positive (₱${prevRes.netVatPayable.toLocaleString('en-PH', { minimumFractionDigits: 2 })}). Excess set to ₱0.00.`,
+          };
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Error reading previous quarter 2550Q data', e);
+  }
+
+  // 3. Try checking saved multi-branch schedule for the previous quarter
   try {
     const branchStorageKey = `bir_branch_schedule_${clientId}_${prevYear}_${prevQuarter}`;
     const branchDataRaw =
@@ -325,8 +435,13 @@ export function getPriorQuarterExcessInputVat(
         }
 
         // Subtract any deferred VAT Due if defined
-        if (parsed.deferralState?.deferredVatDue) {
-          totalOutputTax = Math.max(0, totalOutputTax - (Number(parsed.deferralState.deferredVatDue) || 0));
+        if (parsed.deferralState?.manualVatDue) {
+          totalOutputTax = Math.max(0, totalOutputTax - (Number(parsed.deferralState.manualVatDue) || 0));
+        }
+
+        // Add any sales increase
+        if (parsed.salesPurchasesAdjustmentState?.increaseOutputTax) {
+          totalOutputTax += Number(parsed.salesPurchasesAdjustmentState.increaseOutputTax) || 0;
         }
 
         // Sum purchases files input tax
@@ -357,6 +472,7 @@ export function getPriorQuarterExcessInputVat(
               prevQuarter,
               prevYear,
               source: 'branch_schedule',
+              hasPreviousData: true,
               explanation: `Previous Quarter (${prevQuarter} ${prevYear}) Multi-Branch VAT Due was negative (-₱${excess.toLocaleString('en-PH', { minimumFractionDigits: 2 })}). Transferred as excess input tax.`,
             };
           } else {
@@ -366,6 +482,7 @@ export function getPriorQuarterExcessInputVat(
               prevQuarter,
               prevYear,
               source: 'branch_schedule',
+              hasPreviousData: true,
               explanation: `Previous Quarter (${prevQuarter} ${prevYear}) Multi-Branch VAT Due was positive/zero (₱${prevVatDue.toLocaleString('en-PH', { minimumFractionDigits: 2 })}). Excess set to ₱0.00.`,
             };
           }
@@ -376,62 +493,15 @@ export function getPriorQuarterExcessInputVat(
     console.error('Error reading previous quarter branch schedule', e);
   }
 
-  // 2. Try checking saved BIR Form 2550Q data map in localStorage
-  try {
-    const raw2550Q =
-      typeof window !== 'undefined' ? localStorage.getItem('bir_calc_data_2550Q') : null;
-    if (raw2550Q) {
-      const map = JSON.parse(raw2550Q);
-      const prevKey = `${clientId}_${prevYear}_${prevQuarter}`;
-      const prevData = map[prevKey];
-      if (prevData) {
-        const outputTax =
-          ((Number(prevData.vatableSales) || 0) + (Number(prevData.salesToGovernment) || 0)) * 0.12;
-        const inputPurchases =
-          (((Number(prevData.inputPurchasesGoods) || 0) +
-            (Number(prevData.inputPurchasesServices) || 0) +
-            (Number(prevData.inputCapitalGoods) || 0) +
-            (Number(prevData.inputImportations) || 0)) *
-            0.12) +
-          (Number(prevData.priorQuarterExcessInputVat) || 0);
-        const prevVatDue = outputTax - inputPurchases;
-
-        if (outputTax > 0 || inputPurchases > 0) {
-          if (prevVatDue < 0) {
-            const excess = Math.abs(prevVatDue);
-            return {
-              excessInputVat: excess,
-              prevVatDue,
-              prevQuarter,
-              prevYear,
-              source: '2550q_map',
-              explanation: `Previous Quarter (${prevQuarter} ${prevYear}) Form 2550Q VAT Due was negative (-₱${excess.toLocaleString('en-PH', { minimumFractionDigits: 2 })}). Transferred as excess input tax.`,
-            };
-          } else {
-            return {
-              excessInputVat: 0,
-              prevVatDue,
-              prevQuarter,
-              prevYear,
-              source: '2550q_map',
-              explanation: `Previous Quarter (${prevQuarter} ${prevYear}) Form 2550Q VAT Due was positive/zero (₱${prevVatDue.toLocaleString('en-PH', { minimumFractionDigits: 2 })}). Excess set to ₱0.00.`,
-            };
-          }
-        }
-      }
-    }
-  } catch (e) {
-    console.error('Error reading previous quarter 2550Q data', e);
-  }
-
-  // 3. Fallback: No negative VAT due found from previous quarter
+  // 4. Fallback: No data found from previous quarter
   return {
     excessInputVat: 0,
     prevVatDue: null,
     prevQuarter,
     prevYear,
     source: 'none',
-    explanation: `No negative VAT Due from previous quarter (${prevQuarter} ${prevYear}). Excess set to ₱0.00.`,
+    hasPreviousData: false,
+    explanation: `No data from previous quarter (${prevQuarter} ${prevYear}). Amount box is editable.`,
   };
 }
 

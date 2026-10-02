@@ -488,6 +488,17 @@ export const TaxDeadlineCalendar: React.FC<TaxDeadlineCalendarProps> = ({
             </div>
           )}
         </div>
+
+        {/* Weekend / Holiday Rule Notice Callout */}
+        <div className="flex items-center gap-2.5 px-3.5 py-2.5 bg-amber-50/70 border border-amber-200/80 rounded-lg text-xs text-amber-900 font-sans">
+          <Clock className="w-4 h-4 text-amber-600 shrink-0" />
+          <div>
+            <strong className="font-semibold">Weekend & Public Holiday Statutory Shift Rule:</strong>{' '}
+            <span className="text-amber-800">
+              If a statutory filing or payment deadline falls on a weekend (Saturday or Sunday) or official public holiday, the deadline shifts automatically to the next business day.
+            </span>
+          </div>
+        </div>
       </div>
 
       {/* Main Content Area: Grid View or Agenda View */}
@@ -632,10 +643,14 @@ export const TaxDeadlineCalendar: React.FC<TaxDeadlineCalendarProps> = ({
                           Period: {d.periodCovered}
                         </div>
 
-                        {d.isWeekendShifted && (
-                          <div className="flex items-center gap-1.5 text-[11px] text-amber-700 bg-amber-50 p-1.5 rounded border border-amber-200">
-                            <Clock className="w-3 h-3 shrink-0" />
-                            <span>{d.shiftedReason}</span>
+                        {d.isWeekendShifted ? (
+                          <div className="flex items-center gap-1.5 text-[11px] text-amber-800 bg-amber-50 p-1.5 rounded border border-amber-200">
+                            <Clock className="w-3 h-3 shrink-0 text-amber-600" />
+                            <span><strong>Weekend/Holiday Shift:</strong> {d.shiftedReason}</span>
+                          </div>
+                        ) : (
+                          <div className="text-[10px] text-slate-400 italic">
+                            Weekend/Holiday rule: Shifts to next business day if deadline falls on Saturday, Sunday, or official holiday.
                           </div>
                         )}
 
@@ -822,10 +837,14 @@ export const TaxDeadlineCalendar: React.FC<TaxDeadlineCalendarProps> = ({
                         <span>Basis: <strong className="text-slate-700">{d.legalBasis}</strong></span>
                       </div>
 
-                      {d.isWeekendShifted && (
-                        <div className="flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 p-2 rounded-lg border border-amber-200 mt-2 max-w-xl">
-                          <AlertCircle className="w-4 h-4 shrink-0" />
-                          <span>{d.shiftedReason}</span>
+                      {d.isWeekendShifted ? (
+                        <div className="flex items-center gap-1.5 text-xs text-amber-800 bg-amber-50 p-2 rounded-lg border border-amber-200 mt-2 max-w-xl">
+                          <AlertCircle className="w-4 h-4 shrink-0 text-amber-600" />
+                          <span><strong>Weekend/Holiday Shift:</strong> {d.shiftedReason} (Statutory date was {d.statutoryDate}).</span>
+                        </div>
+                      ) : (
+                        <div className="text-[11px] text-slate-400 italic pt-1">
+                          Weekend/Holiday statutory rule applies: If falling on a weekend or public holiday, filing and payment shifts to the next business day.
                         </div>
                       )}
                     </div>
@@ -860,22 +879,38 @@ export const TaxDeadlineCalendar: React.FC<TaxDeadlineCalendarProps> = ({
 
       {/* Philippine Annual & Quarterly Tax Milestones Guide Bar */}
       <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-3">
-        <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500">
-          <Sparkles className="w-4 h-4 text-indigo-600" />
-          <span>Statutory Philippine BIR Compliance Timetable (EOPT Act RA 11976 Rules)</span>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-2">
+          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-800">
+            <Sparkles className="w-4 h-4 text-indigo-600" />
+            <span>Statutory Philippine BIR Compliance Timetable (Key Rules &amp; Deadlines)</span>
+          </div>
+          <span className="text-[11px] text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 font-medium">
+            Weekend / Holiday Rule: Shifts to next business day
+          </span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5 text-xs">
+          {/* Monthly Returns */}
+          <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 space-y-1">
+            <div className="font-bold text-slate-900 text-xs border-b border-slate-200 pb-1">
+              Monthly Returns
+            </div>
+            <div className="text-slate-600 space-y-1 pt-0.5">
+              <div>• <strong>10th of following mo.:</strong> 1601-C (Payroll WTax)</div>
+              <div>• <strong>10th of following mo.:</strong> 0619-E (M1 &amp; M2 only; M3 covered by 1601-EQ)</div>
+            </div>
+          </div>
+
           {/* Q1 Milestones */}
           <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 space-y-1">
             <div className="font-bold text-slate-900 text-xs border-b border-slate-200 pb-1">
               Q1 Return Deadlines
             </div>
-            <div className="text-slate-600 space-y-0.5">
-              <div>• <strong>Apr 25:</strong> 2550Q (VAT) & 2551Q</div>
-              <div>• <strong>Apr 30:</strong> 1601-EQ & eAFS</div>
+            <div className="text-slate-600 space-y-1 pt-0.5">
+              <div>• <strong>Apr 25:</strong> 2550Q (VAT) &amp; 2551Q</div>
+              <div>• <strong>Apr 30:</strong> 1601-EQ (Q1 EWT)</div>
               <div>• <strong>May 15:</strong> 1701Q (Individuals)</div>
-              <div>• <strong>May 30:</strong> 1702Q (Corporations)</div>
+              <div>• <strong>May 30:</strong> 1702Q (Corporations, 60 days)</div>
             </div>
           </div>
 
@@ -884,11 +919,11 @@ export const TaxDeadlineCalendar: React.FC<TaxDeadlineCalendarProps> = ({
             <div className="font-bold text-slate-900 text-xs border-b border-slate-200 pb-1">
               Q2 Return Deadlines
             </div>
-            <div className="text-slate-600 space-y-0.5">
-              <div>• <strong>Jul 25:</strong> 2550Q (VAT) & 2551Q</div>
+            <div className="text-slate-600 space-y-1 pt-0.5">
+              <div>• <strong>Jul 25:</strong> 2550Q (VAT) &amp; 2551Q</div>
               <div>• <strong>Jul 31:</strong> 1601-EQ (Q2 EWT)</div>
               <div>• <strong>Aug 15:</strong> 1701Q (Individuals)</div>
-              <div>• <strong>Aug 29:</strong> 1702Q (Corporations)</div>
+              <div>• <strong>Aug 29:</strong> 1702Q (Corporations, 60 days)</div>
             </div>
           </div>
 
@@ -897,24 +932,24 @@ export const TaxDeadlineCalendar: React.FC<TaxDeadlineCalendarProps> = ({
             <div className="font-bold text-slate-900 text-xs border-b border-slate-200 pb-1">
               Q3 Return Deadlines
             </div>
-            <div className="text-slate-600 space-y-0.5">
-              <div>• <strong>Oct 25:</strong> 2550Q (VAT) & 2551Q</div>
+            <div className="text-slate-600 space-y-1 pt-0.5">
+              <div>• <strong>Oct 25:</strong> 2550Q (VAT) &amp; 2551Q</div>
               <div>• <strong>Oct 31:</strong> 1601-EQ (Q3 EWT)</div>
               <div>• <strong>Nov 15:</strong> 1701Q (Individuals)</div>
-              <div>• <strong>Nov 29:</strong> 1702Q (Corporations)</div>
+              <div>• <strong>Nov 29:</strong> 1702Q (Corporations, 60 days)</div>
             </div>
           </div>
 
           {/* Q4 & Annual Milestones */}
           <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 space-y-1">
             <div className="font-bold text-slate-900 text-xs border-b border-slate-200 pb-1">
-              Q4 & Annual Milestones
+              Annual &amp; Q4 Milestones
             </div>
-            <div className="text-slate-600 space-y-0.5">
-              <div>• <strong>Jan 25:</strong> 2550Q & 2551Q (Q4)</div>
-              <div>• <strong>Jan 31:</strong> 1604-C & 2316 Issue</div>
-              <div>• <strong>Feb 28:</strong> 1604-E & 2316 Sub.</div>
-              <div>• <strong>Apr 15:</strong> Annual ITR (1701/1702)</div>
+            <div className="text-slate-600 space-y-1 pt-0.5">
+              <div>• <strong>Jan 25:</strong> 2550Q &amp; 2551Q (Q4)</div>
+              <div>• <strong>Jan 31:</strong> 1601-EQ &amp; 1604-C</div>
+              <div>• <strong>Mar 1:</strong> 1604-E / 1604-F</div>
+              <div>• <strong>Apr 15:</strong> Annual 1701 &amp; 1702</div>
             </div>
           </div>
         </div>
@@ -964,15 +999,21 @@ export const TaxDeadlineCalendar: React.FC<TaxDeadlineCalendarProps> = ({
                 </span>
               </div>
 
-              {activeModalDeadline.isWeekendShifted && (
-                <div className="pt-2 border-t border-slate-200 text-amber-800 flex items-start gap-2">
-                  <AlertCircle className="w-4 h-4 shrink-0 text-amber-600 mt-0.5" />
-                  <div>
-                    <strong>Weekend / Holiday Shift:</strong>
-                    <div>{activeModalDeadline.shiftedReason}</div>
+              {/* Weekend / Holiday Rule Statement */}
+              <div className="pt-2 border-t border-slate-200 text-slate-600 flex items-start gap-2">
+                <Clock className="w-4 h-4 shrink-0 text-amber-600 mt-0.5" />
+                <div>
+                  <strong className="text-slate-800 font-semibold">Weekend / Holiday Rule:</strong>
+                  <div className="text-[11px] text-slate-500">
+                    If a statutory deadline falls on a weekend or public holiday, filing and payment shifts to the next business day.
                   </div>
+                  {activeModalDeadline.isWeekendShifted && (
+                    <div className="mt-1 font-medium text-amber-800 bg-amber-50 p-1.5 rounded border border-amber-200">
+                      {activeModalDeadline.shiftedReason} (Statutory date was {activeModalDeadline.statutoryDate}).
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
             </div>
 
             {/* Description & Legal Basis */}

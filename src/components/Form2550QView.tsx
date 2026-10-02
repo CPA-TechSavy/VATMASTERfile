@@ -9,6 +9,7 @@ import {
   Check,
   ArrowRightLeft,
   Lock,
+  Unlock,
 } from 'lucide-react';
 import { PenaltiesModal } from './PenaltiesModal';
 import { BranchVatSchedule } from './BranchVatSchedule';
@@ -198,15 +199,17 @@ export const Form2550QView: React.FC<Form2550QViewProps> = ({
     [client.id, quarter, year]
   );
 
-  // Keep priorQuarterExcessInputVat aligned automatically if previous quarter VAT due is negative
+  // Keep priorQuarterExcessInputVat locked and aligned automatically ONLY if previous quarter data exists
   useEffect(() => {
-    if (data.priorQuarterExcessInputVat !== priorQuarterExcessInfo.excessInputVat) {
-      onChange({
-        ...data,
-        priorQuarterExcessInputVat: priorQuarterExcessInfo.excessInputVat,
-      });
+    if (priorQuarterExcessInfo.hasPreviousData) {
+      if (data.priorQuarterExcessInputVat !== priorQuarterExcessInfo.excessInputVat) {
+        onChange({
+          ...data,
+          priorQuarterExcessInputVat: priorQuarterExcessInfo.excessInputVat,
+        });
+      }
     }
-  }, [client.id, quarter, year, priorQuarterExcessInfo.excessInputVat]);
+  }, [client.id, quarter, year, priorQuarterExcessInfo.hasPreviousData, priorQuarterExcessInfo.excessInputVat]);
 
   const handleBranchScheduleChange = useCallback(
     (updated: {
@@ -509,14 +512,35 @@ export const Form2550QView: React.FC<Form2550QViewProps> = ({
                   <div className="text-sm text-slate-700 font-medium flex items-center gap-2">
                     <span>Prior Quarter's Excess Input Tax</span>
                     <span
-                      className={`text-[10px] font-bold px-1.5 py-0.2 rounded-full ${
-                        priorQuarterExcessInfo.excessInputVat > 0
-                          ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                          : 'bg-slate-100 text-slate-600 border border-slate-200'
+                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-1 ${
+                        priorQuarterExcessInfo.hasPreviousData
+                          ? priorQuarterExcessInfo.excessInputVat > 0
+                            ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                            : 'bg-slate-100 text-slate-600 border border-slate-200'
+                          : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
                       }`}
                     >
-                      {priorQuarterExcessInfo.excessInputVat > 0 ? 'Negative Prev VAT Due' : '₱0.00 (Not Negative)'}
+                      {priorQuarterExcessInfo.hasPreviousData ? (
+                        <>
+                          <Lock className="w-3 h-3 text-slate-500" />
+                          <span>
+                            {priorQuarterExcessInfo.excessInputVat > 0
+                              ? `Locked (${priorQuarterExcessInfo.prevQuarter} Prev Data)`
+                              : 'Locked (₱0.00 - Not Negative)'}
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <Unlock className="w-3 h-3 text-emerald-600" />
+                          <span>Editable (No Prev Qtr Data)</span>
+                        </>
+                      )}
                     </span>
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">
+                    {priorQuarterExcessInfo.hasPreviousData
+                      ? priorQuarterExcessInfo.explanation
+                      : `No data found from previous quarter (${priorQuarterExcessInfo.prevQuarter} ${priorQuarterExcessInfo.prevYear}). Amount box is editable.`}
                   </div>
                 </div>
                 <div className="relative w-full sm:w-60">
@@ -524,9 +548,14 @@ export const Form2550QView: React.FC<Form2550QViewProps> = ({
                   <AccountingInputField
                     id="prior-excess-input-2550q"
                     value={data.priorQuarterExcessInputVat || 0}
-                    readOnly
+                    onChange={(val) => updateField('priorQuarterExcessInputVat', val)}
+                    readOnly={priorQuarterExcessInfo.hasPreviousData}
                     placeholder="0.00"
-                    className="w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right bg-slate-100 text-slate-800 font-semibold border border-slate-200 rounded-lg cursor-not-allowed select-all focus:outline-none"
+                    className={`w-full pl-7 pr-3 py-1.5 text-sm font-mono text-right font-semibold rounded-lg select-all focus:outline-none ${
+                      priorQuarterExcessInfo.hasPreviousData
+                        ? 'bg-slate-100 text-slate-700 border border-slate-200 cursor-not-allowed'
+                        : 'bg-white text-slate-900 border border-slate-300 hover:border-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20'
+                    }`}
                   />
                 </div>
               </div>
@@ -639,17 +668,25 @@ export const Form2550QView: React.FC<Form2550QViewProps> = ({
                 }`}
               >
                 <div className="text-xs uppercase tracking-wider font-semibold opacity-80">
-                  {result.isExcessInputVat ? 'Excess Input VAT to Next Quarter' : 'Net VAT Payable (To BIR)'}
+                  {result.isExcessInputVat ? "Excess Input VAT Carried Over to Next Quarter" : 'Net VAT Payable (To BIR)'}
                 </div>
                 <div className="text-2xl font-bold font-mono mt-1">
                   {result.isExcessInputVat
-                    ? formatPHP(result.excessInputTax)
+                    ? formatPHP(result.carriedOverExcessInputTax)
                     : formatPHP(Math.max(0, result.netVatPayable))}
                 </div>
-                <div className="text-xs mt-1 text-slate-500">
-                  {result.isExcessInputVat
-                    ? 'Available as input credit for succeeding quarters'
-                    : 'Remit to BIR within statutory quarterly deadline'}
+                <div className="text-xs mt-1 text-slate-600">
+                  {result.isExcessInputVat ? (
+                    result.totalTaxCredits > 0 && result.netVatPayable < 0 ? (
+                      <span>
+                        Net VAT Payable is negative ({formatPHP(result.netVatPayable)}). Schedule 3 Tax Credits ({formatPHP(result.totalTaxCredits)}) were added to increase carried over Prior Quarter's Excess Input Tax to {formatPHP(result.carriedOverExcessInputTax)} for next quarter.
+                      </span>
+                    ) : (
+                      'Available as carried over excess input tax credit for succeeding quarter'
+                    )
+                  ) : (
+                    'Remit to BIR within statutory quarterly deadline'
+                  )}
                 </div>
               </div>
 

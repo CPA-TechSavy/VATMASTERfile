@@ -249,6 +249,7 @@ export function getBirDeadlinesForMonth(
       submissionChannel,
       legalBasis,
       description,
+      weekendHolidayRule: 'If a statutory deadline falls on a weekend or public holiday, the filing/payment shifts to the next business day.',
       targetAppTab,
     });
   };
@@ -256,112 +257,96 @@ export function getBirDeadlinesForMonth(
   // Fiscal or Calendar year configuration
   const isFiscal = client?.taxableYearType === 'fiscal' && Boolean(client?.fiscalYearEndMonth && client.fiscalYearEndMonth !== 12);
   const fiscalEndMonth = isFiscal ? client!.fiscalYearEndMonth! : 12;
+  const q1End = ((fiscalEndMonth - 1 + 3) % 12) + 1;
+  const q2End = ((fiscalEndMonth - 1 + 6) % 12) + 1;
+  const q3End = ((fiscalEndMonth - 1 + 9) % 12) + 1;
 
   // Helper for month names
   const prevMonthName = new Date(year, month - 2, 1).toLocaleString('default', { month: 'long' });
   const prevMonthYear = month === 1 ? year - 1 : year;
 
   // -------------------------------------------------------------
-  // 1. DAY 10 DEADLINES:
+  // 1. DAY 10 DEADLINES: MONTHLY RETURNS (1601-C, 0619-E)
   // -------------------------------------------------------------
-  // Month following the close of the taxable year (for year-end 1601-C adjustment on Day 15)
-  const fiscalYearEndAdjMonth = (fiscalEndMonth % 12) + 1;
+  // BIR Form 1601-C: 10th day of the following month (for all months)
+  addDeadline(
+    10,
+    'BIR Form 1601-C',
+    'Monthly Remittance Return of Income Taxes Withheld on Compensation',
+    'withholding_tax',
+    `Payroll & Compensation for ${prevMonthName} ${prevMonthYear}`,
+    { withholdingAgent: true },
+    ['Monthly Alphalist of Payees (MAP) if applicable'],
+    'eBIRForms Offline Package v7.9+ / eFPS',
+    'NIRC Sec. 58 & 81; RR No. 2-98 as amended',
+    'Remittance of taxes withheld from employee compensation for the prior month. Statutory deadline: 10th day of the following month.',
+    '1601C'
+  );
 
-  // 1601-C: For all months except the month following the close of the taxable year
-  if (month !== fiscalYearEndAdjMonth) {
-    addDeadline(
-      10,
-      'BIR Form 1601-C',
-      'Monthly Remittance Return of Income Taxes Withheld on Compensation',
-      'withholding_tax',
-      `Payroll & Compensation for ${prevMonthName} ${prevMonthYear}`,
-      { withholdingAgent: true },
-      ['Monthly Alphalist of Payees (MAP) if applicable'],
-      'eBIRForms Offline Package v7.9+ / eFPS',
-      'NIRC Sec. 58 & 81; RR No. 2-98 as amended',
-      'Remittance of taxes withheld from employee salaries, wages, and compensation for the prior month.',
-      '1601C'
-    );
-  }
+  // BIR Form 0619-E: 10th day of the following month
+  // Statutory logic: Months 1 & 2 of each quarter only; Month 3 is covered by 1601-EQ.
+  // In a calendar year (ending Dec 31):
+  // Q1 (Jan, Feb, Mar): Month 1 (Jan) due Feb 10; Month 2 (Feb) due Mar 10. Month 3 (Mar) covered by 1601-EQ in Apr.
+  // Q2 (Apr, May, Jun): Month 1 (Apr) due May 10; Month 2 (May) due Jun 10. Month 3 (Jun) covered by 1601-EQ in Jul.
+  // Q3 (Jul, Aug, Sep): Month 1 (Jul) due Aug 10; Month 2 (Aug) due Sep 10. Month 3 (Sep) covered by 1601-EQ in Oct.
+  // Q4 (Oct, Nov, Dec): Month 1 (Oct) due Nov 10; Month 2 (Nov) due Dec 10. Month 3 (Dec) covered by 1601-EQ in Jan.
+  const qStartMonths = [
+    (fiscalEndMonth % 12) + 1,
+    ((fiscalEndMonth + 3) % 12) + 1,
+    ((fiscalEndMonth + 6) % 12) + 1,
+    ((fiscalEndMonth + 9) % 12) + 1,
+  ];
 
-  // 0619-E: Monthly Remittance Form for Expanded Withholding Tax (Creditable)
-  // Required for the 1st and 2nd months of each quarter
-  const q1Start = (fiscalEndMonth % 12) + 1;
-  const q1End = ((fiscalEndMonth - 1 + 3) % 12) + 1;
-  const q2End = ((fiscalEndMonth - 1 + 6) % 12) + 1;
-  const q3End = ((fiscalEndMonth - 1 + 9) % 12) + 1;
+  let ewtRemittanceInfo: { qNum: number; monthInQuarter: number } | null = null;
+  qStartMonths.forEach((qStart, qIdx) => {
+    const qNum = qIdx + 1;
+    const m1 = qStart;
+    const m2 = (qStart % 12) + 1;
+    const remitM1 = (m1 % 12) + 1;
+    const remitM2 = (m2 % 12) + 1;
+    if (month === remitM1) {
+      ewtRemittanceInfo = { qNum, monthInQuarter: 1 };
+    } else if (month === remitM2) {
+      ewtRemittanceInfo = { qNum, monthInQuarter: 2 };
+    }
+  });
 
-  const q1RemitM1 = (q1Start % 12) + 1;
-  const q1RemitM2 = ((q1Start + 1 - 1) % 12) + 1;
-  const q2Start = (q1End % 12) + 1;
-  const q2RemitM1 = (q2Start % 12) + 1;
-  const q2RemitM2 = ((q2Start + 1 - 1) % 12) + 1;
-  const q3Start = (q2End % 12) + 1;
-  const q3RemitM1 = (q3Start % 12) + 1;
-  const q3RemitM2 = ((q3Start + 1 - 1) % 12) + 1;
-  const q4Start = (q3End % 12) + 1;
-  const q4RemitM1 = (q4Start % 12) + 1;
-  const q4RemitM2 = ((q4Start + 1 - 1) % 12) + 1;
-
-  const valid0619EMonths = new Set([
-    q1RemitM1, q1RemitM2,
-    q2RemitM1, q2RemitM2,
-    q3RemitM1, q3RemitM2,
-    q4RemitM1, q4RemitM2,
-  ]);
-
-  if (valid0619EMonths.has(month)) {
+  if (ewtRemittanceInfo) {
+    const { qNum, monthInQuarter } = ewtRemittanceInfo as { qNum: number; monthInQuarter: number };
     addDeadline(
       10,
       'BIR Form 0619-E',
-      'Monthly Remittance Form for Creditable Income Taxes Withheld (Expanded)',
+      `Monthly Remittance Form for Creditable Income Taxes Withheld (Expanded) - Q${qNum} Month ${monthInQuarter}`,
       'withholding_tax',
-      `EWT for ${prevMonthName} ${prevMonthYear}`,
+      `EWT for ${prevMonthName} ${prevMonthYear} (Month ${monthInQuarter} of Q${qNum})`,
       { withholdingAgent: true },
       ['Copy of Form 2307 issued to payees'],
       'eBIRForms Offline Package / eFPS / Authorized Agent Banks (AABs)',
       'RR No. 11-2018; RR No. 2-98',
-      'Remittance form used for the first two months of each quarter for creditable withholding taxes.',
+      `Remittance form for Month ${monthInQuarter} of Q${qNum} creditable withholding taxes. Statutory deadline: 10th day of the following month (Months 1 & 2 only; Month 3 is covered by quarterly 1601-EQ).`,
       '1601EQ'
     );
 
     addDeadline(
       10,
       'BIR Form 0619-F',
-      'Monthly Remittance Form of Final Income Taxes Withheld',
+      `Monthly Remittance Form of Final Income Taxes Withheld - Q${qNum} Month ${monthInQuarter}`,
       'withholding_tax',
-      `Final WTax for ${prevMonthName} ${prevMonthYear}`,
+      `Final WTax for ${prevMonthName} ${prevMonthYear} (Month ${monthInQuarter} of Q${qNum})`,
       { withholdingAgent: true },
       ['Schedule of Final Taxes Withheld'],
       'eBIRForms / eFPS',
       'RR No. 11-2018',
-      'Remittance of final withholding taxes on interest, royalties, and dividends withheld in the prior month.'
+      `Remittance of final withholding taxes on interest, royalties, and dividends withheld in Month ${monthInQuarter} of Q${qNum}. Due on or before the 10th day of the following month.`
     );
   }
 
   // -------------------------------------------------------------
-  // 2. DAY 15 DEADLINES:
+  // 2. DAY 15 DEADLINES: ANNUAL ITR & QUARTERLY INDIVIDUAL ITR
   // -------------------------------------------------------------
-  // 1601-C for the final month of the taxable year (with year-end annualized adjustments)
-  if (month === fiscalYearEndAdjMonth) {
-    const endMonthName = MONTH_NAMES_FULL[fiscalEndMonth - 1];
-    addDeadline(
-      15,
-      'BIR Form 1601-C',
-      `Monthly Remittance of Taxes Withheld on Compensation (${endMonthName} Payroll & Year-End Adjustment)`,
-      'withholding_tax',
-      `${endMonthName} Compensation & Annual Year-End Adjustment`,
-      { withholdingAgent: true },
-      ['Year-end Annualized Withholding Tax Adjustment Schedule'],
-      'eBIRForms / eFPS',
-      'NIRC Sec. 81; RR No. 2-98',
-      'Final monthly compensation withholding tax return of the prior taxable year reflecting year-end annualized adjustments.',
-      '1601C'
-    );
-  }
-
-  // Annual Income Tax Return (AITR): 15th day of the 4th month following close of taxable year
-  const aitrDueMonth = ((fiscalEndMonth - 1 + 4) % 12) + 1;
+  // Annual Income Tax Return (AITR): April 15 of the following year (for calendar year filers)
+  // Or 15th day of the 4th month following close of fiscal taxable year
+  const aitrDueMonth = isFiscal ? ((fiscalEndMonth - 1 + 4) % 12) + 1 : 4;
 
   if (month === aitrDueMonth) {
     const endMonthName = MONTH_NAMES_FULL[fiscalEndMonth - 1];
@@ -370,7 +355,7 @@ export function getBirDeadlinesForMonth(
       ? `Taxable Year ending ${endMonthName} ${endDay} (Fiscal Year)`
       : `Taxable Year ${year - 1} (Calendar Year ending Dec 31)`;
 
-    // 1702 Annual (Corporations)
+    // 1702 Annual (Corporations & Partnerships)
     addDeadline(
       15,
       'BIR Form 1702-RT / EX / MX',
@@ -385,7 +370,7 @@ export function getBirDeadlinesForMonth(
       ],
       'eBIRForms / eFPS / eAFS portal',
       'NIRC Sec. 52 & 77; EOPT Act (RA 11976)',
-      'Annual Corporate Income Tax Return for corporations, partnerships, and other juridical entities.',
+      'Annual Corporate Income Tax Return for corporations, partnerships, and juridical entities. Statutory deadline: April 15 of the following year (for calendar year filers).',
       '1702Annual'
     );
 
@@ -404,7 +389,7 @@ export function getBirDeadlinesForMonth(
       ],
       'eBIRForms / eFPS / eAFS for attachments',
       'NIRC Sec. 51; EOPT Act (RA 11976)',
-      'Annual final reconciliation of individual business/professional income tax for the prior taxable year.',
+      'Annual final reconciliation of individual business/professional income tax for the prior taxable year. Statutory deadline: April 15 of the following year.',
       '1701Annual'
     );
   }
@@ -661,11 +646,11 @@ export function getBirDeadlinesForMonth(
     );
   }
 
-  // February 28: 1604-E, 2316 Substituted Filing
-  if (month === 2) {
-    const febLastDay = new Date(year, 2, 0).getDate(); // 28 or 29
+  // March 1: Annual 1604-E & 1604-F, Form 2316 Substituted Filing
+  // Statutory logic: Annual 1604-C / 1604-E: Jan 31 (1604-C) and Mar 1 (1604-E) of the following year.
+  if (month === 3) {
     addDeadline(
-      febLastDay,
+      1,
       'BIR Form 1604-E & Alphalist',
       'Annual Information Return of Creditable Income Taxes Withheld (Expanded)',
       'annual_compliance',
@@ -673,12 +658,25 @@ export function getBirDeadlinesForMonth(
       { withholdingAgent: true },
       ['Annual Alphabetical List of Payees (Alphalist of EWT) via eSubmission'],
       'eBIRForms / eSubmission',
-      'RR No. 11-2018',
-      'Annual consolidation of all payees subjected to expanded withholding tax throughout the preceding year.'
+      'RR No. 11-2018; NIRC Sec. 58',
+      'Annual consolidation of all payees subjected to creditable expanded withholding tax (EWT) throughout the preceding year. Statutory deadline: March 1 of the following year.'
     );
 
     addDeadline(
-      febLastDay,
+      1,
+      'BIR Form 1604-F & Alphalist',
+      'Annual Information Return of Final Income Taxes Withheld',
+      'annual_compliance',
+      `Calendar Year ${year - 1}`,
+      { withholdingAgent: true },
+      ['Annual Alphabetical List of Payees (Alphalist of Final Taxes) via eSubmission'],
+      'eBIRForms / eSubmission',
+      'RR No. 11-2018',
+      'Annual consolidation of all payees subjected to final income taxes withheld throughout the preceding year. Statutory deadline: March 1 of the following year.'
+    );
+
+    addDeadline(
+      1,
       'BIR Form 2316 (BIR Submission)',
       'Submission of Signed BIR Form 2316 Copies for Substituted Filing',
       'annual_compliance',
@@ -687,7 +685,7 @@ export function getBirDeadlinesForMonth(
       ['Certified list of qualified substituted filing employees', 'Scanned / PDF Form 2316 in DVD/USB or eAFS'],
       'RDO Submission / eAFS Portal',
       'RMO No. 24-2019; RR No. 2-98',
-      'Mandatory submission to the BIR RDO of duplicate copies of Form 2316 for employees qualified for substituted filing.'
+      'Mandatory submission to the BIR RDO of duplicate copies of Form 2316 for employees qualified for substituted filing. Statutory deadline: On or before March 1.'
     );
   }
 
